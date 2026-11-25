@@ -1,0 +1,57 @@
+name: CI
+
+# Build check for IST_CADCraft: compiles the desktop app and runs the engine tests.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check:
+    name: Build (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcb1-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev \
+            libfreetype-dev libgl1-mesa-dev libgtk-3-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check (app + UI + engine)
+        run: cargo check --locked -p cadcraft -p cadcraft-ui-egui -p cadcraft-engine
+      - name: Engine command tests
+        run: cargo test --locked -p cadcraft-engine --lib -- cmd::
+      - name: UI unit tests (iStCAD shell + theme)
+        run: cargo test --locked -p cadcraft-ui-egui --lib -- istcad theme
+
+  windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo build --release
+        run: cargo build --locked --release -p cadcraft
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IST_CADCraft-windows-x64
+          path: target/release/cadcraft.exe
