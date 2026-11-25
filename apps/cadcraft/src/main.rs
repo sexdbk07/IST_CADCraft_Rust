@@ -672,6 +672,11 @@ fn main() -> eframe::Result {
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.istcad.enabled = true;
             app.istcad.custom_frame = !cfg!(target_os = "macos");
+            // iStCAD opens with nothing docked: no tool sets, no palettes (Ctrl+1 shows
+            // Properties), no view cube. The Window menu still opens CADCraft's panels.
+            app.ui.show_toolsets = false;
+            app.ui.show_palettes = false;
+            app.ui.show_viewcube = false;
             if surface.present_mode == eframe::wgpu::PresentMode::AutoNoVsync {
                 app.frame_cap = Some(cadcraft_ui_egui::gpu::FrameCap::new(240));
             }

@@ -59,6 +59,7 @@ pub mod i18n;
 pub mod icons;
 pub mod istcad;
 pub mod istcad_icons;
+pub mod istcad_props;
 pub mod keys;
 pub mod layers;
 pub mod managers;
@@ -760,6 +761,9 @@ impl CadApp {
         if !self.ui.shortcuts.is_empty() {
             prefs["shortcuts"] = json!(self.ui.shortcuts);
         }
+        if let Some(usage) = self.istcad.usage_json() {
+            prefs["istcadUsage"] = usage;
+        }
         prefs.to_string()
     }
 
@@ -795,6 +799,9 @@ impl CadApp {
         }
         if let Some(dir) = v.get("lastPgpDir").and_then(Value::as_str).filter(|d| !d.is_empty()) {
             self.ui.last_pgp_dir = Some(dir.to_string());
+        }
+        if let Some(usage) = v.get("istcadUsage") {
+            self.istcad.load_usage(usage);
         }
         if let Some(keys) = v.get("shortcuts").filter(|k| k.is_object()) {
             self.ui.shortcuts = keys::from_prefs(keys);
@@ -1249,8 +1256,12 @@ impl CadApp {
             }
         }
         let has_doc = !self.session.docs.is_empty() && !self.ui.start_tab;
-        if has_doc && !self.ui.show_toolsets {
+        // iStCAD has no tool-set strip: its auto-hide strip ([`istcad::quick_bar`]) stands in.
+        if has_doc && !self.ui.show_toolsets && !self.istcad.enabled {
             palettes::toolsets_strip(self, ui);
+        }
+        if self.istcad.enabled && has_doc {
+            istcad_props::panel(self, ui);
         }
         let central = egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
             if has_doc {

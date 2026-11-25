@@ -141,6 +141,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("perf", "Performance Report", &[], None),
     ("ui.istcad.shell", "iStCAD Interface", &["View", "iStCAD Interface"], None),
     ("ui.istcad.quickbar", "Most-used Commands", &[], None),
+    ("ui.istcad.properties", "Properties", &[], None),
     ("ui.quit", "Quit IST_CADCraft", &[], Some("Cmd+Q")),
 ];
 

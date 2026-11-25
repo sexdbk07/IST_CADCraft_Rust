@@ -139,6 +139,8 @@ pub struct Shell {
     zoom_ref: HashMap<String, f64>,
     /// The window caption last sent, so it is only sent again when it changes.
     caption: String,
+    /// The Properties palette (Ctrl+1).
+    pub props: crate::istcad_props::State,
 }
 
 impl Shell {
@@ -154,7 +156,28 @@ impl Shell {
         }
     }
 
-    /// How often `id` was started this session.
+    /// The usage counts as saved with the preferences (`None` before anything was used), as
+    /// iStCAD keeps them between sessions.
+    pub fn usage_json(&self) -> Option<Value> {
+        (!self.usage.is_empty()).then(|| {
+            let sorted: std::collections::BTreeMap<&String, &u32> = self.usage.iter().collect();
+            json!(sorted)
+        })
+    }
+
+    /// Restore saved usage counts; entries that are not a command and a count are skipped.
+    pub fn load_usage(&mut self, v: &Value) {
+        let Some(map) = v.as_object() else { return };
+        for (id, n) in map.iter().take(1000) {
+            if let Some(n) = n.as_u64().and_then(|n| u32::try_from(n).ok())
+                && cadcraft_engine::cmd::find_command(id).is_some()
+            {
+                self.usage.insert(id.clone(), n);
+            }
+        }
+    }
+
+    /// How often `id` was started (saved counts included).
     pub fn uses(&self, id: &str) -> u32 {
         self.usage.get(id).copied().unwrap_or(0)
     }
@@ -176,6 +199,12 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
             Some(Ok(json!({ "shell": app.istcad.enabled })))
         }
         "ui.istcad.quickbar" => Some(Ok(json!({ "commands": app.istcad.ranked() }))),
+        // Ctrl+1 and PROPERTIES (PR, PROPS) show or hide iStCAD's Properties palette. With
+        // parameters (`{handles}` from automation) PROPERTIES stays the engine's query.
+        "ui.istcad.properties" if app.istcad.enabled => Some(Ok(crate::istcad_props::toggle(app, params.get("on").and_then(Value::as_bool)))),
+        "ui.panel.properties" | "properties" | "pr" | "props" if app.istcad.enabled && params.as_object().is_none_or(|o| o.is_empty()) => {
+            Some(Ok(crate::istcad_props::toggle(app, None)))
+        }
         _ => None,
     }
 }
