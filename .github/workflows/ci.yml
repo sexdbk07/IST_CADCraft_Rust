@@ -36,7 +36,7 @@ jobs:
       - name: cargo check (app + UI + engine)
         run: cargo check --locked -p cadcraft -p cadcraft-ui-egui -p cadcraft-engine
       - name: Engine command tests
-        run: cargo test --locked -p cadcraft-engine --lib -- cmd::
+        run: "cargo test --locked -p cadcraft-engine --lib -- cmd::"
       - name: UI unit tests (iStCAD shell + theme)
         run: cargo test --locked -p cadcraft-ui-egui --lib -- istcad theme
 
