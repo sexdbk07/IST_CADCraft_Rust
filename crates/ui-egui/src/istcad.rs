@@ -636,7 +636,8 @@ fn layout_tabs(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
 
 /// A text toggle in iStCAD's status style: light fill and dark text when on.
 fn status_toggle(ui: &mut egui::Ui, t: Tokens, label: &str, on: bool, tip: &str) -> egui::Response {
-    let (fill, ink) = if on { (Color32::from_rgb(0xae, 0xb4, 0xbe), Color32::from_rgb(0x29, 0x2e, 0x36)) } else { (t.control, t.text) };
+    // On: light fill with dark text (iStCAD's checked toggle), so the state never rests on colour hue alone.
+    let (fill, ink) = if on { (t.text_dim, t.chrome_dark) } else { (t.control, t.text) };
     let button =
         egui::Button::new(RichText::new(label).size(10.0).color(ink).strong()).fill(fill).stroke(Stroke::new(1.0, t.border)).corner_radius(3);
     let resp = ui.add(button.min_size(vec2(0.0, 20.0))).on_hover_text(crate::i18n::t(tip));
