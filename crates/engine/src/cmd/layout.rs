@@ -88,6 +88,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .noundo(),
         CommandSpec::new("exportpdf", "Export to PDF...", |s, p| run_plot(s, &super::plotters::plot_options(s, p, "exportpdf")?, "exportpdf"))
             .menu(&["File", "Export to PDF..."])
+            .alias(&["pdf"])
             .params("{path? (else returns base64 `data`), layout?, device? (its papers; the output stays PDF), paper?, landscape?, fit?, scale?, center?: bool (Model, default true), offset?: [x,y] mm (Model, when center is false; each within ±100000), lineweights?, plotTransparency?, plotArea?, window?} (as PLOT)")
             .noundo(),
         CommandSpec::new("mspace", "Model Space (in viewport)", run_mspace)

@@ -327,3 +327,32 @@ pub(crate) fn targets(s: &Session, p: &Value) -> Result<Vec<Handle>> {
 pub(crate) fn ok() -> Result<Value> {
     Ok(Value::Null)
 }
+
+#[cfg(test)]
+mod istcad_alias_tests {
+    use super::resolve_alias;
+
+    /// The short names iStCAD users type reach the same commands here.
+    #[test]
+    fn istcad_short_names_reach_their_commands() {
+        for (typed, id) in [
+            ("L", "line"),
+            ("PL", "pline"),
+            ("C", "circle"),
+            ("REC", "rectang"),
+            ("A", "arc"),
+            ("S", "select"),
+            ("E", "erase"),
+            ("M", "move"),
+            ("CO", "copy"),
+            ("ZE", "zoom.extents"),
+            ("ZP", "zoom.previous"),
+            ("U", "u"),
+            ("Y", "redo"),
+            ("PDF", "exportpdf"),
+            ("STR", "stretch"),
+        ] {
+            assert_eq!(resolve_alias(typed), id, "{typed}");
+        }
+    }
+}

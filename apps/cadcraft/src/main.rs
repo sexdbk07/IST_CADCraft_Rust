@@ -312,6 +312,9 @@ fn window_options(restoring: bool, stencil: u8) -> eframe::NativeOptions {
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false)
+            // The iStCAD shell draws its own title bar and window buttons on Windows and Linux;
+            // macOS keeps its traffic lights in the full-size content view.
+            .with_decorations(cfg!(target_os = "macos"))
             .with_app_id(os_window::app_id()),
         // The size, position and maximized state are kept between sessions (#2595); eframe keeps a
         // restored window on the monitors that are connected now.
@@ -667,6 +670,8 @@ fn main() -> eframe::Result {
                 app.session.set_lisp_support_dir(Some(support));
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
+            app.istcad.enabled = true;
+            app.istcad.custom_frame = !cfg!(target_os = "macos");
             if surface.present_mode == eframe::wgpu::PresentMode::AutoNoVsync {
                 app.frame_cap = Some(cadcraft_ui_egui::gpu::FrameCap::new(240));
             }

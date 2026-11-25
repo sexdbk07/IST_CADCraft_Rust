@@ -128,8 +128,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.dialog.dsettings", "Drafting Settings...", &[], None),
     #[cfg(not(target_arch = "wasm32"))]
     ("ui.updates.check", "Check for Updates…", &["Help", "Check for Updates…"], None),
-    ("ui.dialog.about", "About CADCraft", &["Help", "About CADCraft"], None),
-    ("ui.dialog.commands", "Command Reference", &["Help", "CADCraft Help"], Some("F1")),
+    ("ui.dialog.about", "About IST_CADCraft", &["Help", "About IST_CADCraft"], None),
+    ("ui.dialog.commands", "Command Reference", &["Help", "IST_CADCraft Help"], Some("F1")),
     ("ui.toggle.history", "Command History", &["Window", "Command History"], Some("F2")),
     ("ui.cmdline.lines", "Command Line History Lines", &[], None),
     ("ui.cmdline.clear", "Clear Command History", &[], None),
@@ -138,7 +138,10 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.shortcuts", "Keyboard Shortcuts...", &["Tools", "Customize", "Keyboard Shortcuts..."], None),
     ("ui.language", "Language", &[], None),
     ("ui.noop", "", &[], None),
-    ("ui.quit", "Quit CADCraft", &[], Some("Cmd+Q")),
+    ("perf", "Performance Report", &[], None),
+    ("ui.istcad.shell", "iStCAD Interface", &["View", "iStCAD Interface"], None),
+    ("ui.istcad.quickbar", "Most-used Commands", &[], None),
+    ("ui.quit", "Quit IST_CADCraft", &[], Some("Cmd+Q")),
 ];
 
 pub fn is_ui_command(id: &str) -> bool {
@@ -151,6 +154,9 @@ pub fn run_ui_command(app: &mut CadApp, id: &str, params: &Value) -> Option<Resu
 }
 
 fn route_ui_subsystems(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+    if let Some(result) = crate::istcad::route(app, id, params) {
+        return Some(result);
+    }
     if let Some(result) = crate::spacemouse::route(app, id, params) {
         return Some(result);
     }

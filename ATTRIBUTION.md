@@ -9,9 +9,9 @@ artwork, fonts, hatch patterns, linetypes, templates or presets.** Every asset i
 CADCraft contributors or third-party material under an open licence (OSI open source, public domain
 / CC0, or Creative Commons that allows redistribution). Screenshots of Autodesk software are never
 committed. Font files are not added here: shared fonts live in
-[storytold/craft-fonts](https://github.com/storytold/craft-fonts), an optional build input. The one
-exception is the ArtCraft brand in `docs/brand/`: ArtCraft trademarks, not open source, used under
-`docs/brand/LICENSE-brand.txt`.
+[storytold/craft-fonts](https://github.com/storytold/craft-fonts), an optional build input. IST_CADCraft
+removed CADCraft's ArtCraft brand files (`docs/brand/`), as the CADCraft brand terms require for
+derived works, and replaced the app icon with the iStCAD icon (iSt Solutions' own artwork).
 
 Generated-in-code assets are original and have no file to list:
 - the UI icon set (`crates/ui-egui/src/icons.rs`);
@@ -31,20 +31,20 @@ Generated-in-code assets are original and have no file to list:
 | `krilla 0.8.2 / icc/sGrey-v4.icc` (dependency-embedded) | Clinton Ingram | [craft-libs 9f89fe8 vendor/krilla/icc/sGrey-v4.icc](https://github.com/storytold/craft-libs/blob/9f89fe8f6d72ab4db4cc06f186381a6a254463ab/vendor/krilla/icc/sGrey-v4.icc) (Krilla 0.8.2 upstream 3ffdf0588cf98050aad6edba51ca70162e1fb5b5) | CC0-1.0 | Embedded by the pinned PDF writer (`craft-pdf` 0.1.0, Krilla 0.8.2); unmodified dependency asset, no file copied into this repository. SHA-256 `00c0f94e09127520a17dc0e1d9264b5702081d96dbdb1549ee88e3631ce42a9d`. |
 | `krilla 0.8.2 / icc/sRGB-v2-magic.icc` (dependency-embedded) | Clinton Ingram | [craft-libs 9f89fe8 vendor/krilla/icc/sRGB-v2-magic.icc](https://github.com/storytold/craft-libs/blob/9f89fe8f6d72ab4db4cc06f186381a6a254463ab/vendor/krilla/icc/sRGB-v2-magic.icc) (Krilla 0.8.2 upstream 3ffdf0588cf98050aad6edba51ca70162e1fb5b5) | CC0-1.0 | Embedded by the pinned PDF writer (`craft-pdf` 0.1.0, Krilla 0.8.2); unmodified dependency asset, no file copied into this repository. SHA-256 `af4efe28f6d311799865f325ba39184a2e978b113ca74124d60af7de22b105f4`. |
 | `krilla 0.8.2 / icc/sRGB-v4.icc` (dependency-embedded) | Clinton Ingram | [craft-libs 9f89fe8 vendor/krilla/icc/sRGB-v4.icc](https://github.com/storytold/craft-libs/blob/9f89fe8f6d72ab4db4cc06f186381a6a254463ab/vendor/krilla/icc/sRGB-v4.icc) (Krilla 0.8.2 upstream 3ffdf0588cf98050aad6edba51ca70162e1fb5b5) | CC0-1.0 | Embedded by the pinned PDF writer (`craft-pdf` 0.1.0, Krilla 0.8.2); unmodified dependency asset, no file copied into this repository. SHA-256 `c56e1685d888f5edb92fe07f2750f387f8fe8e91b32ff8fb0b56bfbbb9458353`. |
-| `assets/app-icon/hicolor/128x128/apps/ai.storyteller.cadcraft.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Linux hicolor icon |
-| `assets/app-icon/hicolor/16x16/apps/ai.storyteller.cadcraft.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Linux hicolor icon |
-| `assets/app-icon/hicolor/24x24/apps/ai.storyteller.cadcraft.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Linux hicolor icon |
-| `assets/app-icon/hicolor/256x256/apps/ai.storyteller.cadcraft.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Linux hicolor icon |
-| `assets/app-icon/hicolor/32x32/apps/ai.storyteller.cadcraft.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Linux hicolor icon |
-| `assets/app-icon/hicolor/48x48/apps/ai.storyteller.cadcraft.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Linux hicolor icon |
-| `assets/app-icon/hicolor/512x512/apps/ai.storyteller.cadcraft.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Linux hicolor icon |
-| `assets/app-icon/hicolor/64x64/apps/ai.storyteller.cadcraft.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Linux hicolor icon |
+| `assets/app-icon/hicolor/128x128/apps/ai.storyteller.cadcraft.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Linux hicolor icon |
+| `assets/app-icon/hicolor/16x16/apps/ai.storyteller.cadcraft.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Linux hicolor icon |
+| `assets/app-icon/hicolor/24x24/apps/ai.storyteller.cadcraft.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Linux hicolor icon |
+| `assets/app-icon/hicolor/256x256/apps/ai.storyteller.cadcraft.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Linux hicolor icon |
+| `assets/app-icon/hicolor/32x32/apps/ai.storyteller.cadcraft.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Linux hicolor icon |
+| `assets/app-icon/hicolor/48x48/apps/ai.storyteller.cadcraft.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Linux hicolor icon |
+| `assets/app-icon/hicolor/512x512/apps/ai.storyteller.cadcraft.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Linux hicolor icon |
+| `assets/app-icon/hicolor/64x64/apps/ai.storyteller.cadcraft.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Linux hicolor icon |
 | `assets/app-icon/cadcraft.icns` | CADCraft contributors | generated (packaging/icons.sh) | MIT OR Apache-2.0 | macOS icon |
-| `assets/app-icon/cadcraft.ico` | CADCraft contributors | generated (packaging/icons.sh) | MIT OR Apache-2.0 | Windows icon |
-| `assets/app-icon/cadcraft-64.png` | CADCraft contributors | generated | MIT OR Apache-2.0 | |
-| `assets/app-icon/cadcraft-256.png` | CADCraft contributors | generated | MIT OR Apache-2.0 | |
-| `assets/app-icon/cadcraft-1024.png` | CADCraft contributors | generated | MIT OR Apache-2.0 | |
-| `assets/app-icon/cadcraft-macos-512.png` | CADCraft contributors | generated (macOS margin variant) | MIT OR Apache-2.0 | |
+| `assets/app-icon/cadcraft.ico` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | Windows icon |
+| `assets/app-icon/cadcraft-64.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | |
+| `assets/app-icon/cadcraft-256.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | |
+| `assets/app-icon/cadcraft-1024.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | |
+| `assets/app-icon/cadcraft-macos-512.png` | iSt Solutions | rendered from `assets/app-icon/istcad.svg` (iStCAD_1 `Assets/iStCAD_Icon.svg`) | iSt Solutions, own work | |
 | `assets/app-icon/README.md` | CADCraft contributors | original work for this repository | MIT OR Apache-2.0 | How each icon is generated and which mark each channel uses |
 | `assets/app-icon/cadcraft-nightly.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | Nightly mark: same glyph, deeper background `#0c657b`; the Linux nightly tar's icon |
 | `assets/app-icon/cadcraft-nightly-1024.png` | CADCraft contributors | generated from `assets/app-icon/cadcraft-1024.png` | MIT OR Apache-2.0 | 1024 master the nightly `.icns` is generated from |
@@ -57,14 +57,6 @@ Generated-in-code assets are original and have no file to list:
 | `docs/images/ui-apartment.png` | CADCraft contributors | screenshot of CADCraft itself (examples/apartment.dxf) | MIT OR Apache-2.0 | Original; no Autodesk UI |
 | `docs/images/ui-layout.png` | CADCraft contributors | screenshot of CADCraft itself (a layout of examples/apartment.dxf) | MIT OR Apache-2.0 | Original; no Autodesk UI |
 | `docs/images/ui-bracket.png` | CADCraft contributors | screenshot of CADCraft itself (sample drawing generated in code) | MIT OR Apache-2.0 | Original; no Autodesk UI |
-| `docs/brand/artcraft-logo-white.png` | ArtCraft Team | ArtCraft brand kit | ArtCraft brand terms (`docs/brand/LICENSE-brand.txt`) | Trademark, not open source |
-| `docs/brand/artcraft-logo-white.svg` | ArtCraft Team | ArtCraft brand kit | ArtCraft brand terms (`docs/brand/LICENSE-brand.txt`) | Trademark, not open source |
-| `docs/brand/artcraft-logo.png` | ArtCraft Team | ArtCraft brand kit | ArtCraft brand terms (`docs/brand/LICENSE-brand.txt`) | Trademark, not open source |
-| `docs/brand/artcraft-logo.svg` | ArtCraft Team | ArtCraft brand kit | ArtCraft brand terms (`docs/brand/LICENSE-brand.txt`) | Trademark, not open source |
-| `docs/brand/artcraft-mark-black.png` | ArtCraft Team | ArtCraft brand kit | ArtCraft brand terms (`docs/brand/LICENSE-brand.txt`) | Trademark, not open source |
-| `docs/brand/artcraft-mark-black.svg` | ArtCraft Team | ArtCraft brand kit | ArtCraft brand terms (`docs/brand/LICENSE-brand.txt`) | Trademark, not open source |
-| `docs/brand/artcraft-mark.png` | ArtCraft Team | ArtCraft brand kit | ArtCraft brand terms (`docs/brand/LICENSE-brand.txt`) | Trademark, not open source |
-| `docs/brand/artcraft-mark.svg` | ArtCraft Team | ArtCraft brand kit | ArtCraft brand terms (`docs/brand/LICENSE-brand.txt`) | Trademark, not open source |
 
 ## Interface translations
 

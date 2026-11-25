@@ -57,6 +57,7 @@ pub mod gpu;
 pub mod grip_dyn;
 pub mod i18n;
 pub mod icons;
+pub mod istcad;
 pub mod keys;
 pub mod layers;
 pub mod managers;
@@ -312,6 +313,8 @@ pub struct CadApp {
     /// Drawings being read on worker threads ([`opening`]).
     pub opening: opening::Opening,
     pub integrated_titlebar: bool,
+    /// The iStCAD shell (title bar, tool bars, auto-hide strip and command dock).
+    pub istcad: istcad::Shell,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Fresh surface and identity snapshot (see [`capture`]).
     pub(crate) capture_geometry: Option<capture::CaptureGeometry>,
@@ -413,6 +416,7 @@ impl CadApp {
             status: None,
             opening: opening::Opening::default(),
             integrated_titlebar: false,
+            istcad: istcad::Shell::default(),
             control_rx: None,
             capture_geometry: None,
             capture_epoch: 0,
@@ -632,6 +636,7 @@ impl CadApp {
 
     /// Start a command as if typed (interactive when it has prompts).
     pub fn start(&mut self, name: &str) {
+        self.istcad.note(name);
         if clipboard::defer(self, name, None) {
             return;
         }
@@ -669,6 +674,9 @@ impl CadApp {
             let name = cadcraft_engine::keyboard::latin_keys(first)
                 .filter(|_| !self.session.greek_word_is_a_command(first))
                 .unwrap_or_else(|| first.to_ascii_lowercase());
+            if !json_form {
+                self.istcad.note(first);
+            }
             // A typed command drops a paste still waiting for the clipboard (a typed paste is held anew below).
             if !first.is_empty() && !self.paste.running {
                 self.paste.cancel();
@@ -1213,12 +1221,24 @@ impl CadApp {
         self.sync_bars();
         control::begin_frame(ui.ctx());
         let t = theme::Tokens::get();
-        chrome::title_and_toolbar(self, ui);
-        if self.ui.in_window_menu {
-            menus::menu_bar(self, ui);
-        }
-        if self.ui.show_status_bar {
-            chrome::status_bar(self, ui);
+        if self.istcad.enabled {
+            istcad::resize_edges(self, ui.ctx());
+            istcad::title_bar(self, ui);
+            if self.ui.in_window_menu {
+                menus::menu_bar(self, ui);
+            }
+            istcad::main_toolbar(self, ui);
+            if self.ui.show_status_bar {
+                istcad::command_dock(self, ui);
+            }
+        } else {
+            chrome::title_and_toolbar(self, ui);
+            if self.ui.in_window_menu {
+                menus::menu_bar(self, ui);
+            }
+            if self.ui.show_status_bar {
+                chrome::status_bar(self, ui);
+            }
         }
         if self.ui.show_file_tabs {
             chrome::file_tabs(self, ui);
@@ -1227,13 +1247,16 @@ impl CadApp {
         if has_doc && !self.ui.show_toolsets {
             palettes::toolsets_strip(self, ui);
         }
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
+        let central = egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
             if has_doc {
                 docking::show(self, ui);
             } else {
                 chrome::start_page(self, ui);
             }
         });
+        if self.istcad.enabled && has_doc {
+            istcad::quick_bar(self, ui.ctx(), central.response.rect);
+        }
         self.opening.show(ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
         updates_ui::show(self, ui.ctx());

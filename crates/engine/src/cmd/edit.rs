@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
             )
             .noundo()
             .interactive(|_| Ok(Box::new(UndoM::default()))),
-        CommandSpec::new("redo", "Redo", run_redo).menu(&["Edit", "Redo"]).key("Cmd+Shift+Z").params("{count?: n}").noundo(),
+        CommandSpec::new("redo", "Redo", run_redo).menu(&["Edit", "Redo"]).alias(&["y"]).key("Cmd+Shift+Z").params("{count?: n}").noundo(),
         CommandSpec::new("mredo", "Redo", run_mredo).params("{count?: n} | {all: true}").noundo().interactive(|_| Ok(Box::new(MredoM))),
         CommandSpec::new("cutclip", "Cut", run_cut)
             .menu(&["Edit", "Cut"])
@@ -64,6 +64,8 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("selectall", "Select All", run_selectall).menu(&["Edit", "Select All"]).key("Cmd+A").alias(&["ai_selall"]).noundo(),
         CommandSpec::new("ai_deselect", "Deselect All", run_deselect).params("{}").noundo(),
         CommandSpec::new("select", "Select", run_select)
+            // iStCAD: S enters selection.
+            .alias(&["s"])
             .params("{handles: [hex]} | {window: [[x,y],[x,y]], crossing?: bool} | {at: [x,y]} | {clear: true} | {add?: bool}")
             .noundo()
             .interactive(|_| Ok(Box::new(SelectM::default()))),

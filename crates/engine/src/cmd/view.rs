@@ -38,6 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(ZoomM { start: ZoomStart::Dynamic, ..Default::default() }))),
         CommandSpec::new("zoom.previous", "Zoom Previous", |s, _| zoom(s, &json!({"mode":"previous"})))
             .menu(&["View", "Zoom", "Previous"])
+            .alias(&["zp"])
             .noundo()
             .transparent(),
         CommandSpec::new("zoom.window", "Zoom Window", run_zoom)
@@ -51,6 +52,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("zoom.all", "Zoom All", |s, _| zoom(s, &json!({"mode":"all"}))).menu(&["View", "Zoom", "All"]).noundo().transparent(),
         CommandSpec::new("zoom.extents", "Zoom Extents", |s, _| zoom(s, &json!({"mode":"extents"})))
             .menu(&["View", "Zoom", "Extents"])
+            .alias(&["ze"])
             .noundo()
             .transparent(),
         CommandSpec::new("zoom.object", "Zoom Object", |s, p| {

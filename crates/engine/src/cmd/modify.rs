@@ -78,7 +78,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(SelectThen::new(Op::Mirror)))),
         CommandSpec::new("stretch", "Stretch", run_stretch)
             .menu(&["Modify", "Stretch"])
-            .alias(&["s"])
+            // iStCAD keeps S for SELECT; STRETCH answers to STR.
+            .alias(&["str"])
             .params("{window: [[x,y],[x,y]] | polygon: [[x,y],...] | fence: [[x,y],...], delta: [dx,dy]}")
             .interactive(|_| Ok(Box::new(StretchM::default()))),
         CommandSpec::new("offset", "Offset", run_offset)
