@@ -1,4 +1,6 @@
 use super::widgets::draw_lock;
+use egui::Color32;
+
 use super::{CadApp, Pos2, Rect, Shape, Stroke, Tokens, Vec2, pos2, vec2};
 
 /// The Dynamic Input tooltip beside the cursor, styled like the command line. At a point prompt
@@ -7,6 +9,10 @@ use super::{CadApp, Pos2, Rect, Shape, Stroke, Tokens, Vec2, pos2, vec2};
 /// (a distance prompt's field is on show, [`crate::grip_dyn`]) only the prompt and its options.
 pub(super) fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2, fields: bool) {
     app.cmd.option_rows.clear();
+    if app.istcad.enabled {
+        istcad_dynamic_input(app, p, hover, fields);
+        return;
+    }
     // While the options menu is open the tooltip stays where it opened, so the menu can be reached.
     let at = match app.cmd.options {
         Some(_) => *app.cmd.options_anchor.get_or_insert(hover),
@@ -267,4 +273,120 @@ fn dynamic_input_boxes(
         x += bw;
     }
     r
+}
+
+/// iStCAD's dynamic input panel (`ViewportDynamicInputPanel`): 242 points wide, 18 points below
+/// and right of the pointer and kept 8 points inside the drawing area; `#363C45` at 95 %, a
+/// `#AEB4BE` border, radius 3, padding 5,4. The prompt (10 points, `#F0F1F4`) over "↳" and the
+/// value field (23 high, `#4A515B`, `#858B94` border, 11 points, white). The field holds what is
+/// typed; with nothing typed it shows the live value under the pointer, dimmed. With no command
+/// running, typing shows "Command:" and the command name, as iStCAD's viewport entry does. Typing,
+/// Tab, the options menu (↓) and Enter keep the command line's handling.
+fn istcad_dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2, fields: bool) {
+    const W: f32 = 242.0;
+    const FILL: Color32 = Color32::from_rgba_unmultiplied_const(0x36, 0x3c, 0x45, 0xf2);
+    const EDGE: Color32 = Color32::from_rgb(0xae, 0xb4, 0xbe);
+    const PROMPT: Color32 = Color32::from_rgb(0xf0, 0xf1, 0xf4);
+    const ARROW: Color32 = Color32::from_rgb(0xc0, 0xc5, 0xce);
+    const FIELD: Color32 = Color32::from_rgb(0x4a, 0x51, 0x5b);
+    const FIELD_EDGE: Color32 = Color32::from_rgb(0x85, 0x8b, 0x94);
+    let prompt = app.session.current_prompt();
+    let typed = app.cmd.buffer.clone();
+    let (message, options) = match &prompt {
+        Some(pr) if app.session.settings.dynprompt => {
+            let mut m = if pr.raw { pr.display() } else { crate::i18n::t(&pr.message).to_string() };
+            if !pr.raw && !pr.keywords.is_empty() {
+                m.push_str(&format!(" [{}]", pr.keywords.join("/")));
+            }
+            if let Some(d) = pr.default.as_ref().filter(|_| !pr.raw) {
+                m.push_str(&format!(" <{d}>"));
+            }
+            if !pr.raw {
+                m.push(':');
+            }
+            (m, !pr.keywords.is_empty())
+        }
+        Some(_) => (String::new(), false),
+        // No command: the panel shows only while a command name is being typed.
+        None if !typed.is_empty() => (crate::tl!("Command:").to_string(), false),
+        None => return,
+    };
+    // With nothing typed, the live value under the pointer (dimmed), as a hint of what Enter takes.
+    let live = if !typed.is_empty() || fields || prompt.is_none() {
+        None
+    } else {
+        app.canvas.cursor.and_then(|c| {
+            app.session.live_value(c).or_else(|| match prompt.as_ref().and_then(|pr| pr.base) {
+                Some(base) => {
+                    Some(format!("{} < {}°", distance_text(&app.session, base.dist(c)), (base.angle_to(c).to_degrees() * 10.0).round() / 10.0))
+                }
+                None => prompt
+                    .as_ref()
+                    .filter(|pr| pr.accept.point)
+                    .map(|_| format!("{}, {}", distance_text(&app.session, c.x), distance_text(&app.session, c.y))),
+            })
+        })
+    };
+    let at = match app.cmd.options {
+        Some(_) => *app.cmd.options_anchor.get_or_insert(hover),
+        None => {
+            app.cmd.options_anchor = None;
+            hover
+        }
+    };
+    let area = p.clip_rect();
+    let show_prompt = !message.is_empty();
+    let h = 4.0 + if show_prompt { 13.0 + 3.0 } else { 0.0 } + 23.0 + 4.0;
+    let left = (at.x + 18.0).clamp(area.left() + 8.0, (area.right() - W - 8.0).max(area.left() + 8.0));
+    let top = (at.y + 18.0).clamp(area.top() + 8.0, (area.bottom() - h - 8.0).max(area.top() + 8.0));
+    let r = Rect::from_min_size(pos2(left, top), vec2(W, h));
+    p.rect(r, 3.0, FILL, Stroke::new(1.0, EDGE), egui::StrokeKind::Inside);
+    let inner = r.shrink2(vec2(5.0, 4.0));
+    let mut y = inner.top();
+    if show_prompt {
+        let mut job = egui::text::LayoutJob::simple_singleline(message, egui::FontId::proportional(10.0), PROMPT);
+        let room = inner.width() - if options { OPTIONS_HINT_W } else { 0.0 };
+        job.wrap = egui::text::TextWrapping { max_width: room, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let g = p.layout_job(job);
+        p.galley(pos2(inner.left(), y), g, PROMPT);
+        if options {
+            options_hint(p, Rect::from_min_max(pos2(r.left(), r.top()), pos2(r.right(), r.top() + 16.0 + 4.0)));
+        }
+        y += 13.0 + 3.0;
+    }
+    let row_cy = y + 23.0 / 2.0;
+    p.text(pos2(inner.left(), row_cy), egui::Align2::LEFT_CENTER, "↳", egui::FontId::proportional(14.0), ARROW);
+    let field = Rect::from_min_max(pos2(inner.left() + 18.0, y), pos2(inner.right(), y + 23.0));
+    p.rect(field, 2.0, FIELD, Stroke::new(1.0, FIELD_EDGE), egui::StrokeKind::Inside);
+    let font = egui::FontId::proportional(11.0);
+    let mut x = field.left() + 4.0;
+    if typed.is_empty() {
+        if let Some(live) = live {
+            let mut job = egui::text::LayoutJob::simple_singleline(live, font, FIELD_EDGE);
+            job.wrap =
+                egui::text::TextWrapping { max_width: field.width() - 10.0, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+            p.galley(pos2(x, row_cy - 7.0), p.layout_job(job), FIELD_EDGE);
+        }
+    } else {
+        let g = p.layout_no_wrap(typed, font, Color32::WHITE);
+        // A long entry shows its end, where the caret is.
+        let shift = (g.size().x - (field.width() - 12.0)).max(0.0);
+        let gw = g.size().x;
+        p.with_clip_rect(field.shrink(1.0)).galley(pos2(x - shift, row_cy - g.size().y / 2.0), g, Color32::WHITE);
+        x += gw - shift;
+    }
+    if !app.cmd.preedit.is_empty() {
+        let g = p.layout_no_wrap(app.cmd.preedit.clone(), egui::FontId::proportional(11.0), Color32::WHITE);
+        let gw = g.size().x;
+        p.galley(pos2(x, row_cy - g.size().y / 2.0), g, Color32::WHITE);
+        p.line_segment([pos2(x, row_cy + 7.0), pos2(x + gw, row_cy + 7.0)], Stroke::new(1.0, EDGE));
+        x += gw;
+    }
+    if !fields {
+        p.line_segment([pos2(x + 1.0, row_cy - 7.0), pos2(x + 1.0, row_cy + 7.0)], Stroke::new(1.0, Color32::WHITE));
+    }
+    if app.cmd.second_locked() {
+        draw_lock(p, pos2(field.right() - 9.0, row_cy), EDGE);
+    }
+    options_menu(app, p, r, hover);
 }
