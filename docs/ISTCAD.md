@@ -18,6 +18,24 @@ iStCAD is the reference: sizes, colours and order below are iStCAD's.
 | Properties palette (Ctrl+1): column 296 on the right, hidden at start, `#363C45`, padding 14; "Properties"; selection box `#4A515B` ("No selection" / type / "N objects selected"); expanders General (open), 3D Visualization, View, Misc; rows 29 high, label `#BEC4CD` 1 part, value `#E1E3E8` right-aligned 1.15 parts. General: Count, Type, Layer, Color, then one object's handle and geometry (Line: Start/End X Y, Length, Angle; Circle: Center X Y, Radius, Diameter; Arc: Center, Radius, Start/End angle; Polyline: Closed, Vertices, Length), Linetype, Lineweight. Toggling it is noted in the command history. | `istcad_props.rs`: the same, toggled by Ctrl+1, PROPERTIES, PR and PROPS (`ui.istcad.properties {"on"}` for automation). Values come from `properties.describe` and are edited through `properties.set`: click a value to type (Enter applies, Esc cancels) or pick (Layer, Color, Linetype). The selection box limits the rows to one object type. Text, MText and Dimension selections add the engine's own groups. 3D Visualization holds Thickness, View the view centre and height, Misc linetype scale and transparency. |
 | Command dock 86, two rows, columns 4.35 : 1.05. Left: command bar 40 (`#3B414A`, "›", "Command:", input, status 10 pt ≤ 260, ⌃ history), then Model/layout tabs (selected `#565D67`, others `#414750`), `+` 27, PDF 36×24. Right: OSNAP ORTHO POLAR OTRACK DYN (18 high, on `#AEB4BE` with `#292E36` text) + drafting settings; then ▧ ▣ ⚙, zoom %, −, +, Ext. 45, slider 68, GRID 38×22. AutoComplete 430 wide above the input (name column 130, description `#9FADB2`, selected `#5A6069`); history 196 high above the dock (`#182226` at 95 %). | `command_dock`, `command_bar`, `autocomplete`, `history_window`, `layout_tabs`, `drafting_toggles`, `zoom_controls`: the same. The command line shows the running command's prompt with clickable options; typing, Enter/Space, Tab, arrows and F2 keep CADCraft's command-line handling. The zoom readout's 100 % is how the drawing first showed. |
 
+## Drawing area behaviour
+
+- **Dynamic input (DYN)**: iStCAD's panel, 242 wide, 18 points below-right of the pointer and
+  kept 8 points inside the drawing area (`#363C45` at 95 %, `#AEB4BE` border): the prompt (10 pt,
+  with options and default) over "↳" and the value field (`#4A515B`). It holds what is typed, or the
+  live value under the pointer, dimmed; "Command:" while a command name is typed with nothing
+  running. (`canvas/dyn_boxes.rs`, `istcad_dynamic_input`.)
+- **Object snap marker**: iStCAD's shapes in `#55E6A5` with the short mode name (END, MID, CEN,
+  QUAD, INT, INS…) on a dark tag 8 points right and 5 below. (`canvas/cursor.rs`.)
+- **Selection, as in AutoCAD**: a click on empty space starts the rectangular window (second
+  click closes it; left to right = window, right to left = crossing). Pressing and dragging from
+  empty space draws a **lasso** of any shape: dragged to the right it is a window lasso (blue,
+  solid: objects entirely inside), to the left a crossing lasso (green, dashed: inside or
+  crossed); **Space** while dragging cycles Window → Crossing → Fence (objects the path crosses).
+  Shift removes from the selection. It works with no command running and at "Select objects".
+  Typed WP / CP / F at "Select objects" still give polygon windows and fences.
+  (`canvas/lasso.rs`; engine `select::LassoKind`, `Session::lasso_select`.)
+
 ## Start-up and saved state
 
 With the shell on, the app opens as iStCAD does: no tool sets, no docked palettes, no view cube

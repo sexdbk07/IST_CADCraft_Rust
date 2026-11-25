@@ -681,6 +681,38 @@ pub enum SelectKind {
     Group,
 }
 
+/// How a press-and-drag lasso selects (AutoCAD's lasso): Window takes the objects entirely inside
+/// the path, Crossing those inside or crossed by it, Fence those the path crosses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LassoKind {
+    Window,
+    Crossing,
+    Fence,
+}
+
+impl LassoKind {
+    /// The kind Space switches to while dragging: Window → Crossing → Fence → Window.
+    pub fn next(self) -> Self {
+        match self {
+            LassoKind::Window => LassoKind::Crossing,
+            LassoKind::Crossing => LassoKind::Fence,
+            LassoKind::Fence => LassoKind::Window,
+        }
+    }
+
+    /// The objects a lasso along `pts` selects, through a viewport whose `frozen` layers are not
+    /// drawn. Window and Crossing close the path; they need three points, Fence two.
+    pub fn select_in(self, d: &Drawing, space: &Space, frozen: &[String], pts: &[Vec2]) -> Vec<Handle> {
+        let pts: Vec<Vec2> = pts.iter().copied().filter(|p| p.is_finite()).take(MAX_MODE_POINTS).collect();
+        match self {
+            LassoKind::Window => select_polygon_in(d, space, frozen, &pts, false),
+            LassoKind::Crossing => select_polygon_in(d, space, frozen, &pts, true),
+            LassoKind::Fence if pts.len() >= 2 => select_fence_in(d, space, frozen, &pts),
+            LassoKind::Fence => Vec::new(),
+        }
+    }
+}
+
 /// Most points a fence or polygon collects (typed input is hostile).
 pub(crate) const MAX_MODE_POINTS: usize = 10_000;
 
@@ -757,6 +789,24 @@ mod tests {
     use super::*;
     use cadcraft_doc::{Common, Image, Raster, RayLine};
     use cadcraft_geom::Vec3;
+
+    /// A lasso shaped like an L (concave): a short line in its notch is outside it, a line in
+    /// its arm is inside, and a line poking out of the arm is crossed.
+    #[test]
+    fn lasso_kinds_select_inside_crossed_and_fenced_objects() {
+        let mut d = Drawing::new_metric();
+        let line = |a: (f64, f64), b: (f64, f64)| EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) });
+        let inside = d.add(&Space::Model, Common::default(), line((1.0, 1.0), (2.0, 1.0))).unwrap();
+        let notch = d.add(&Space::Model, Common::default(), line((7.0, 7.0), (8.0, 7.0))).unwrap();
+        let poking = d.add(&Space::Model, Common::default(), line((1.0, 8.0), (1.0, 12.0))).unwrap();
+        let l = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (4.0, 4.0), (4.0, 10.0), (0.0, 10.0)].map(|(x, y)| Vec2::new(x, y));
+        let window = LassoKind::Window.select_in(&d, &Space::Model, &[], &l);
+        assert!(window.contains(&inside) && !window.contains(&notch) && !window.contains(&poking), "{window:?}");
+        let crossing = LassoKind::Crossing.select_in(&d, &Space::Model, &[], &l);
+        assert!(crossing.contains(&inside) && crossing.contains(&poking) && !crossing.contains(&notch), "{crossing:?}");
+        let fence = LassoKind::Fence.select_in(&d, &Space::Model, &[], &[Vec2::new(0.0, 10.0), Vec2::new(5.0, 10.0)]);
+        assert!(fence.contains(&poking) && !fence.contains(&inside), "{fence:?}");
+    }
 
     fn fence_hits(kind: EntityKind, fence: [(f64, f64); 2]) -> usize {
         let mut d = Drawing::new_metric();

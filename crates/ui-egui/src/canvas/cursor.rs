@@ -63,6 +63,101 @@ pub(super) fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
     p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
 }
 
+/// iStCAD's object snap marker (`ViewportOsnapMarker`): `#55E6A5`, 1.5 points, a translucent
+/// fill; iStCAD's shapes for END (square), MID (triangle), CEN (circle with a cross), QUAD
+/// (square with a cross), INT (×, with a cross) and INS (diamond), CADCraft's for the other modes
+/// in the same colour; and the short mode name (9 points, semibold, `#B8F3D7` on `#222A33` at
+/// 75 %) 8 points right and 5 points below the snap point.
+pub(super) fn istcad_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
+    use snap::mode;
+    const INK: Color32 = Color32::from_rgb(0x55, 0xe6, 0xa5);
+    const FILL: Color32 = Color32::from_rgba_unmultiplied_const(0x22, 0x32, 0x2a, 0x30);
+    const LABEL: Color32 = Color32::from_rgb(0xb8, 0xf3, 0xd7);
+    const LABEL_BG: Color32 = Color32::from_rgba_unmultiplied_const(0x22, 0x2a, 0x33, 0xc0);
+    let st = Stroke::new(1.5, INK);
+    let q = |x: f32, y: f32| at + vec2(x, y);
+    let cross = |p: &egui::Painter| {
+        p.line_segment([q(-7.0, 0.0), q(7.0, 0.0)], st);
+        p.line_segment([q(0.0, -7.0), q(0.0, 7.0)], st);
+    };
+    let square = |p: &egui::Painter| {
+        p.rect(Rect::from_center_size(at, vec2(10.0, 10.0)), 0.0, FILL, st, egui::StrokeKind::Middle);
+    };
+    let label = match hit.mode {
+        mode::END => {
+            square(p);
+            "END"
+        }
+        mode::MID => {
+            p.add(Shape::convex_polygon(vec![q(0.0, -6.0), q(6.0, 5.0), q(-6.0, 5.0)], FILL, st));
+            "MID"
+        }
+        mode::CEN | mode::GCEN => {
+            p.circle(at, 5.0, FILL, st);
+            cross(p);
+            if hit.mode == mode::CEN { "CEN" } else { "GCEN" }
+        }
+        mode::QUA => {
+            square(p);
+            cross(p);
+            "QUAD"
+        }
+        mode::INT | mode::APP => {
+            p.line_segment([q(-5.0, -5.0), q(5.0, 5.0)], st);
+            p.line_segment([q(5.0, -5.0), q(-5.0, 5.0)], st);
+            cross(p);
+            if hit.mode == mode::INT { "INT" } else { "APP" }
+        }
+        mode::INS => {
+            p.add(Shape::convex_polygon(vec![q(0.0, -6.0), q(6.0, 0.0), q(0.0, 6.0), q(-6.0, 0.0)], FILL, st));
+            "INS"
+        }
+        other => {
+            // The remaining modes keep CADCraft's shapes, in iStCAD's colour.
+            let s = 5.0;
+            match other {
+                mode::PER => {
+                    p.line(vec![q(-s, -s), q(-s, s), q(s, s)], st);
+                    p.line(vec![q(-s, 0.0), q(0.0, 0.0), q(0.0, s)], st);
+                    "PER"
+                }
+                mode::TAN => {
+                    p.circle_stroke(at, s * 0.8, st);
+                    p.line_segment([q(-s, -s), q(s, -s)], st);
+                    "TAN"
+                }
+                mode::NOD => {
+                    p.circle_stroke(at, s, st);
+                    p.line_segment([q(-s, -s), q(s, s)], st);
+                    p.line_segment([q(s, -s), q(-s, s)], st);
+                    "NOD"
+                }
+                mode::NEA => {
+                    p.line(vec![q(-s, -s), q(s, -s), q(-s, s), q(s, s), q(-s, -s)], st);
+                    "NEA"
+                }
+                mode::EXT => {
+                    p.line_segment([q(-s, 0.0), q(s, 0.0)], Stroke::new(1.5, INK));
+                    "EXT"
+                }
+                mode::PAR => {
+                    p.line_segment([q(-s, s), q(0.0, -s)], st);
+                    p.line_segment([q(0.0, s), q(s, -s)], st);
+                    "PAR"
+                }
+                _ => {
+                    square(p);
+                    hit.name
+                }
+            }
+        }
+    };
+    let galley = p.layout_no_wrap(label.to_string(), egui::FontId::proportional(9.0), LABEL);
+    let r = Rect::from_min_size(at + vec2(8.0, 5.0), galley.size() + vec2(6.0, 2.0));
+    p.rect_filled(r, 0.0, LABEL_BG);
+    p.galley(r.min + vec2(3.0, 1.0), galley, LABEL);
+}
+
 /// The whole degrees (0–359) a tracking tooltip shows for the path `from` → `to`, measured from
 /// the current UCS's X axis at `ucs` radians.
 pub(super) fn tooltip_angle(from: Vec2, to: Vec2, ucs: f64) -> i64 {

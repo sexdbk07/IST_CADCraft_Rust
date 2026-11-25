@@ -18,13 +18,14 @@ mod draw;
 mod dyn_boxes;
 mod grid;
 mod grips;
+mod lasso;
 mod list;
 mod pick;
 mod press;
 mod viewport;
 mod widgets;
 
-use cursor::{draw_crosshair, draw_snap_marker, draw_tracking, effective_point, override_cursor};
+use cursor::{draw_crosshair, draw_snap_marker, draw_tracking, effective_point, istcad_snap_marker, override_cursor};
 use cycle::{CycleList, cycle_badge, cycle_click, cycle_list, over_canvas_menu, shift_space_cycle};
 pub(crate) use draw::{Look, draw_highlight, draw_list};
 use draw::{dashed_polygon, dashed_rect, draw_drag_gpu, draw_highlight_gpu, draw_list_gpu, list_mesh_key, selection_area_fill};
@@ -187,6 +188,8 @@ pub struct CanvasState {
     pub param: crate::parametric::Cache,
     /// The primary-button press being held, when it was acted on (see [`press`]).
     press: Option<press::Press>,
+    /// The lasso a press on empty space is dragging (see [`lasso`]).
+    lasso: Option<lasso::Lasso>,
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
     /// menu ([`crate::context_menu`]).
     pub snap_menu: bool,
@@ -561,7 +564,11 @@ fn paint_pointer_overlay(frame: &mut CanvasPaint<'_>, paper_rect: Option<Rect>, 
         draw_tracking(painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0, app.session.input_ucs().rotation());
     }
     if let (Some(hit), Some(_)) = (app.canvas.snap, app.canvas.cursor) {
-        draw_snap_marker(painter, xf.to_screen(hit.point), &hit);
+        if app.istcad.enabled {
+            istcad_snap_marker(painter, xf.to_screen(hit.point), &hit);
+        } else {
+            draw_snap_marker(painter, xf.to_screen(hit.point), &hit);
+        }
     }
     draw_tiles(app, ui, tiles);
     // UCS icon, ViewCube and viewport label.
@@ -581,6 +588,19 @@ fn paint_pointer_overlay(frame: &mut CanvasPaint<'_>, paper_rect: Option<Rect>, 
     // Typing and Escape reach the command line even when its overlay is hidden, unless the
     // inline constraint editor already handled this frame's keys (Enter would otherwise repeat
     // `last_command`, e.g. immediately undoing the edit after Cmd+Z).
+    // Space while a lasso is dragged switches its kind instead of reaching the command line.
+    if app.canvas.press.is_some()
+        && let Some(l) = &mut app.canvas.lasso
+    {
+        let spaces = ui.ctx().input_mut(|i| {
+            let n = i.events.iter().filter(|e| matches!(e, egui::Event::Key { key: egui::Key::Space, pressed: true, .. })).count();
+            i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Space, .. }) && !matches!(e, egui::Event::Text(t) if t == " "));
+            n
+        });
+        for _ in 0..spaces {
+            l.cycle();
+        }
+    }
     if !crate::parametric::take_keyboard(app) {
         crate::cmdline::keyboard(app, ui.ctx());
     }
@@ -769,6 +789,7 @@ fn handle_presses(app: &mut CadApp, ui: &egui::Ui, context: &PressContext) -> bo
         match step {
             press::Step::Down(pos, m) => {
                 app.canvas.press = None;
+                app.canvas.lasso = None;
                 if !inside || !rect.contains(pos) || middle_down {
                     continue;
                 }
@@ -789,6 +810,8 @@ fn handle_presses(app: &mut CadApp, ui: &egui::Ui, context: &PressContext) -> bo
                 if press_takes(app, &xf, pos) {
                     let opened = press_at(app, &xf, ui.ctx(), pos, m);
                     app.canvas.press = Some(press::Press::new(pos, opened));
+                    // A press that opened a selection window drags a lasso (iStCAD shell, as AutoCAD).
+                    app.canvas.lasso = (opened && app.istcad.enabled && app.session.settings.pickdrag).then(|| lasso::Lasso::new(pos));
                 } else if !app.session.realtime_zoom_active() && !app.session.realtime_pan_active() {
                     // A grip with no command running: clicked when the button comes up. egui
                     // calls a press held longer than 0.8 s a drag, and a slow drawing's frames
@@ -799,6 +822,9 @@ fn handle_presses(app: &mut CadApp, ui: &egui::Ui, context: &PressContext) -> bo
             press::Step::Move(pos) => {
                 if let Some(p) = &mut app.canvas.press {
                     p.moved(pos, now);
+                    if let Some(l) = &mut app.canvas.lasso {
+                        l.add(pos);
+                    }
                 }
             }
             press::Step::Up(pos) => {
@@ -814,6 +840,22 @@ fn handle_presses(app: &mut CadApp, ui: &egui::Ui, context: &PressContext) -> bo
                     }
                     continue;
                 }
+                // A drag from empty space selects along its lasso; a click leaves the rectangular
+                // window waiting for its second corner.
+                if let Some(mut l) = app.canvas.lasso.take()
+                    && p.opened_window
+                    && app.session.pending_window.is_some()
+                    && p.released_as_drag(pos, now)
+                {
+                    l.add(pos);
+                    if l.is_drawn() {
+                        let world: Vec<Vec2> = l.points.iter().map(|q| xf.to_world(*q)).collect();
+                        if let Err(e) = app.session.lasso_select(&world, l.kind(), mods.shift) {
+                            app.session.echo(e.to_string());
+                        }
+                        continue;
+                    }
+                }
                 // PICKDRAG off: a window takes two clicks, a drag doesn't close it (#1032).
                 if app.session.settings.pickdrag && p.released_as_drag(pos, now) && p.opened_window && app.session.pending_window.is_some() {
                     let end = xf.to_world(pos);
@@ -828,6 +870,7 @@ fn handle_presses(app: &mut CadApp, ui: &egui::Ui, context: &PressContext) -> bo
     if !primary_down {
         // The button came up where we didn't see it (outside the window, say).
         app.canvas.press = None;
+        app.canvas.lasso = None;
     }
     click_used
 }
@@ -1304,8 +1347,16 @@ fn paint_canvas(frame: CanvasPaint<'_>) {
             draw_list(painter, &xf, &list, bg, false);
         }
     }
+    // A lasso being dragged shows instead of the rectangle its press opened.
+    let lasso_drawn = app.canvas.press.is_some() && app.canvas.lasso.as_ref().is_some_and(lasso::Lasso::is_drawn);
+    if lasso_drawn && let Some(l) = &app.canvas.lasso {
+        let s = &app.session.settings;
+        let window = (selection_area_fill(s, false), Stroke::new(1.0, t.window_stroke));
+        let crossing = (selection_area_fill(s, true), Stroke::new(1.0, t.crossing_stroke));
+        lasso::paint(painter, l, window, crossing);
+    }
     // Pending selection window.
-    if let (Some(pw), Some(c)) = (app.session.pending_window, raw_world) {
+    if let (false, Some(pw), Some(c)) = (lasso_drawn, app.session.pending_window, raw_world) {
         // The world box it selects (turned in a twisted view).
         let corners = [pw.corner, Vec2::new(c.x, pw.corner.y), c, Vec2::new(pw.corner.x, c.y)].map(|q| xf.to_screen(q));
         let crossing = app.session.window_is_crossing(pw.corner, c);

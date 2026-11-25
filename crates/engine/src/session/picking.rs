@@ -16,6 +16,28 @@ impl Session {
         true
     }
 
+    /// A lasso (press and drag from empty space) along `pts` selects with `kind`: at "Select
+    /// objects" the objects go to the command; with no command running they join the selection
+    /// with [`Self::idle_click`]'s PICKADD and Shift rules. Any open selection window closes.
+    pub fn lasso_select(&mut self, pts: &[Vec2], kind: select::LassoKind, shift: bool) -> Result<()> {
+        self.pending_window = None;
+        let space = self.space();
+        let hs = kind.select_in(self.doc()?, &space, self.viewport_frozen(), pts);
+        let hs = cmd::groups::expand(self, hs);
+        if self.running.is_some() {
+            return self.input(Input::Pick(hs));
+        }
+        let pickadd = self.settings.pickadd;
+        let mut sel = if pickadd || shift { self.stored_selection() } else { Vec::new() };
+        if shift && pickadd {
+            sel.retain(|h| !hs.contains(h));
+        } else {
+            sel.extend(hs);
+        }
+        self.set_selection(sel);
+        Ok(())
+    }
+
     /// Whether a selection window from `corner` to `p` is a crossing window: it was dragged
     /// leftwards on screen (in a twisted view, not along the drawing's X axis).
     pub fn window_is_crossing(&self, corner: Vec2, p: Vec2) -> bool {
