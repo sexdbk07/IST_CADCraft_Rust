@@ -147,7 +147,7 @@ impl Tokens {
         icon_accent: Color32::from_rgb(0x55, 0xc7, 0xc0),
         icon_point: Color32::from_rgb(0xf2, 0xa5, 0x6f),
         accent: Color32::from_rgb(0x55, 0xc7, 0xc0),
-        selection: Color32::from_rgb(0x4a, 0x8f, 0xff),
+        selection: Color32::from_rgb(0xff, 0xa5, 0x00),
         hover: Color32::from_rgb(0x9c, 0xc6, 0xff),
         grip: Color32::from_rgb(0x2f, 0x6b, 0xff),
         grip_hot: Color32::from_rgb(0xff, 0x3b, 0x3b),

@@ -478,7 +478,7 @@ fn search_box(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
         .frame(egui::Frame::NONE)
         .text_color(ink::LABEL)
         .desired_width(field.width())
-        .vertical_align(egui::Align::Center);
+        .align(egui::Align2::LEFT_CENTER);
     let resp = ui.put(field, edit).on_hover_text(crate::tl!("Search commands and tools"));
     let hits = search_commands(&app.istcad.search);
     let mut run = None;
@@ -486,12 +486,12 @@ fn search_box(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
         run = hits.first().map(|h| h.0);
     }
     // The list stays up while the pointer is on it, so a click there lands after the field lost focus.
-    let keep_id = ui.id().with("ist_search_keep");
+    let keep_id = ui.scope_id().with("ist_search_keep");
     let keep = ui.data(|d| d.get_temp::<bool>(keep_id)).unwrap_or(false);
     let mut over = false;
     if (resp.has_focus() || keep) && !hits.is_empty() {
         let at = host.left_bottom() + vec2(0.0, 4.0);
-        egui::Area::new(ui.id().with("ist_search_hits")).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
+        egui::Area::new(ui.scope_id().with("ist_search_hits")).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
             list_frame().show(ui, |ui| {
                 ui.set_width(host.width().max(300.0));
                 for (id, label) in &hits {
@@ -677,7 +677,7 @@ fn picker_box(ui: &mut egui::Ui, picker: &Picker, t: Tokens) -> Option<String> {
     crate::icons::describe_control(ui, &resp, picker.label, None, false);
     let resp = resp.on_hover_text(crate::i18n::t(picker.tip));
     let mut picked = None;
-    egui::Popup::menu(&resp).id(egui::Id::new(picker.id)).show(|ui| {
+    egui::Popup::menu(&resp).id(egui::Id::unique(picker.id)).show(|ui| {
         ui.set_min_width(picker.width);
         if picker.items.is_empty() {
             ui.label(RichText::new(crate::tl!("No drawing open")).color(t.text_dim));
@@ -788,7 +788,7 @@ fn drawing_tab(app: &mut CadApp, ui: &mut egui::Ui, index: usize, title: &str, d
     p.circle_filled(pos2(rect.left() + 8.0 + 3.5, rect.center().y), 3.5, if dirty { ink::DIRTY } else { ink::CLEAN });
     p.galley(pos2(rect.left() + 22.0, rect.center().y - name.size().y / 2.0), name, Color32::WHITE);
     let close_rect = Rect::from_center_size(pos2(rect.right() - 5.0 - 10.5, rect.center().y), vec2(21.0, 21.0));
-    let close = ui.interact(close_rect, ui.id().with(("ist_tab_close", index)), Sense::click());
+    let close = ui.interact(close_rect, ui.scope_id().with(("ist_tab_close", index)), Sense::click());
     if close.hovered() {
         ui.painter().rect_filled(close_rect, 3.0, Tokens::get().control_hover);
     }
@@ -805,7 +805,7 @@ fn drawing_tab(app: &mut CadApp, ui: &mut egui::Ui, index: usize, title: &str, d
 
 /// The drawing area's 1-point `#626973` frame.
 pub fn canvas_frame(ctx: &egui::Context, area: Rect) {
-    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("ist_canvas_frame")));
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("ist_canvas_frame")));
     p.rect_stroke(area, 0.0, Stroke::new(1.0, ink::CANVAS_EDGE), egui::StrokeKind::Inside);
 }
 
@@ -821,7 +821,7 @@ pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
     let radius = egui::CornerRadius { nw: 0, sw: 0, ne: 3, se: 3 };
     let open = app.istcad.quick_open;
     let shell = &app.istcad;
-    egui::Area::new(egui::Id::new("ist_quick_bar")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("ist_quick_bar")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let (fill, edge) = if open { (t.chrome, t.border) } else { (t.control_hover, ink::CANVAS_EDGE) };
         let frame = egui::Frame::NONE.fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(radius);
         frame.show(ui, |ui| {
@@ -830,7 +830,7 @@ pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
             if !open {
                 let r = ui.max_rect();
                 ui.painter().text(r.center(), Align2::CENTER_CENTER, "›", FontId::proportional(19.0), Color32::from_rgb(0xd0, 0xd9, 0xdb));
-                let resp = ui.interact(r, ui.id().with("ist_quick_handle"), Sense::hover());
+                let resp = ui.interact(r, ui.scope_id().with("ist_quick_handle"), Sense::hover());
                 crate::icons::describe_control(ui, &resp, "Show drawing toolbar", None, false);
                 return;
             }
@@ -945,7 +945,7 @@ fn command_bar(app: &mut CadApp, ui: &mut egui::Ui, bar: Rect, dock_top: f32, t:
                 let count = pr.keywords.len();
                 for (i, k) in pr.keywords.iter().enumerate() {
                     let r = line.put(k.clone(), t.cmd_keyword);
-                    let resp = ui.interact(r.expand2(vec2(1.0, 4.0)), ui.id().with(("ist_kw", i)), Sense::click());
+                    let resp = ui.interact(r.expand2(vec2(1.0, 4.0)), ui.scope_id().with(("ist_kw", i)), Sense::click());
                     if resp.hovered() {
                         painter.rect_filled(r.expand2(vec2(1.0, 3.0)), 2.0, t.cmd_keyword_hover.gamma_multiply(0.6));
                     }
@@ -994,7 +994,7 @@ fn command_bar(app: &mut CadApp, ui: &mut egui::Ui, bar: Rect, dock_top: f32, t:
         let g = painter.layout_job(job);
         painter.galley(pos2(expand.left() - 8.0 - g.size().x, cy - g.size().y / 2.0), g, Color32::WHITE);
     }
-    let resp = ui.interact(expand, ui.id().with("ist_cmd_expand"), Sense::click());
+    let resp = ui.interact(expand, ui.scope_id().with("ist_cmd_expand"), Sense::click());
     if resp.hovered() || app.cmd.expanded {
         painter.rect_filled(expand, 3.0, t.control_hover);
     }
@@ -1025,7 +1025,7 @@ fn latest_status(app: &CadApp) -> String {
 /// The command history window above the dock: "Command History" and the log, newest at the bottom.
 fn history_window(app: &CadApp, ctx: &egui::Context, at: egui::Pos2, width: f32, t: Tokens) {
     let radius = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
-    egui::Area::new(egui::Id::new("ist_cmd_history")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("ist_cmd_history")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         egui::Frame::NONE
             .fill(ink::HISTORY_BG)
             .stroke(Stroke::new(1.0, ink::CANVAS_EDGE))
@@ -1054,7 +1054,7 @@ fn autocomplete(app: &mut CadApp, ctx: &egui::Context, bottom_left: egui::Pos2) 
     }
     let h = sug.len() as f32 * 28.0 + 6.0;
     let mut run = None;
-    egui::Area::new(egui::Id::new("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(bottom_left - vec2(0.0, h)).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(bottom_left - vec2(0.0, h)).show(ctx, |ui| {
         list_frame().show(ui, |ui| {
             ui.set_width(426.0);
             ui.spacing_mut().item_spacing.y = 0.0;

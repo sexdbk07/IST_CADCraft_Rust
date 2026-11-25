@@ -418,7 +418,7 @@ fn polyline_length(pts: &[(f64, f64, f64)], closed: bool) -> f64 {
 /// One expander: its header (a chevron and the title, semibold `#E4E9EA`, a `#535A64` rule
 /// under it) and, when open, its rows.
 fn section_ui(app: &mut CadApp, ui: &mut egui::Ui, s: &Section, handles: &[Handle]) {
-    let id = ui.id().with(("ist_prop_section", s.title));
+    let id = ui.scope_id().with(("ist_prop_section", s.title));
     let open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(s.open_by_default);
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if open { 34.0 } else { 42.0 }), Sense::click());
     let p = ui.painter();
@@ -548,7 +548,7 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
     let edit = egui::TextEdit::singleline(text)
         .frame(egui::Frame::NONE)
         .text_color(VALUE_INK)
-        .horizontal_align(egui::Align::RIGHT)
+        .align(egui::Align2::RIGHT_CENTER)
         .margin(egui::Margin::symmetric(6, 2));
     let resp = ui.put(rect, edit);
     if app.istcad.props.focus_pending {

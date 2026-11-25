@@ -12,6 +12,24 @@ fn adaptive(unit: f64, scale: f64, min_px: f64) -> f64 {
     u
 }
 
+/// iStCAD's grid step: lines about 20 pixels apart, the world step rounded to 1, 2, 5 or 10
+/// times a power of ten (every fifth line is a major one).
+fn istcad_step(scale: f64) -> f64 {
+    let desired = 20.0 / scale.max(1e-12);
+    let decade = 10f64.powf(desired.log10().floor());
+    let n = desired / decade;
+    let m = if n < 1.5 {
+        1.0
+    } else if n < 3.5 {
+        2.0
+    } else if n < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+    m * decade
+}
+
 /// Index ranges of the grid lines inside `wb` for line spacing `minor`, or `None` when there would be
 /// 2000 lines or more along an axis. The span is computed with checked arithmetic: a huge view
 /// saturates the float-to-integer casts at the i64 limits, and subtracting those would overflow.
@@ -33,8 +51,14 @@ pub(super) fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
     } else if s.gridmode {
         let major_n = f64::from(s.gridmajor.max(1));
         let unit = if s.gridunit.x == 0.0 { s.snapunit.x } else { s.gridunit.x };
-        let minor = adaptive(unit, xf.scale, 8.0);
-        let major = minor * major_n;
+        // The iStCAD shell draws iStCAD's grid: about 20 pixels, 1-2-5 steps, every fifth major.
+        let (minor, major) = if app.istcad.enabled {
+            let m = istcad_step(xf.scale);
+            (m, m * 5.0)
+        } else {
+            let m = adaptive(unit, xf.scale, 8.0);
+            (m, m * major_n)
+        };
         // Keep the visible grid's checked ranges in the snap frame, then map its lines through
         // the UCS and the view (including its twist); the painter clips them to the viewport.
         let space = app.session.space();
@@ -66,9 +90,10 @@ pub(super) fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
     // The current UCS's X and Y axes through its origin.
     let u = app.session.input_ucs();
     let o = u.origin.xy();
+    let axis_w = if app.istcad.enabled { 1.15 } else { 1.0 };
     for (dir, color) in [(u.x.xy(), t.axis_x), (u.y.xy(), t.axis_y)] {
         if let Some(seg) = clip_infinite(xf, o, dir, false) {
-            p.line_segment(seg, Stroke::new(1.0, color));
+            p.line_segment(seg, Stroke::new(axis_w, color));
         }
     }
 }
@@ -107,5 +132,21 @@ mod grid_range_tests {
         assert_eq!(super::grid_index_ranges(&huge, 1.0), None);
         let normal = Bounds2::new(Vec2::new(-5.0, 0.0), Vec2::new(5.0, 10.0));
         assert_eq!(super::grid_index_ranges(&normal, 1.0), Some(((-5, 5), (0, 10))));
+    }
+}
+
+#[cfg(test)]
+mod istcad_grid_tests {
+    use super::istcad_step;
+
+    #[test]
+    fn istcad_grid_lines_stay_near_twenty_pixels_on_a_1_2_5_ladder() {
+        for scale in [0.013, 0.4, 1.0, 3.7, 25.0, 900.0] {
+            let step = istcad_step(scale);
+            let px = step * scale;
+            assert!((9.0..=40.0).contains(&px), "scale {scale}: {px} px");
+            let lead = step / 10f64.powf(step.log10().floor());
+            assert!([1.0, 2.0, 5.0, 10.0].iter().any(|m| (lead - m).abs() < 1e-9), "{step}");
+        }
     }
 }

@@ -315,6 +315,8 @@ fn window_options(restoring: bool, stencil: u8) -> eframe::NativeOptions {
             // The iStCAD shell draws its own title bar and window buttons on Windows and Linux;
             // macOS keeps its traffic lights in the full-size content view.
             .with_decorations(cfg!(target_os = "macos"))
+            // iStCAD opens maximized; a saved window state is restored instead.
+            .with_maximized(!restoring)
             .with_app_id(os_window::app_id()),
         // The size, position and maximized state are kept between sessions (#2595); eframe keeps a
         // restored window on the monitors that are connected now.
@@ -677,6 +679,8 @@ fn main() -> eframe::Result {
             app.ui.show_toolsets = false;
             app.ui.show_palettes = false;
             app.ui.show_viewcube = false;
+            // iStCAD shows its grid from the start (GRID on).
+            app.session.settings.gridmode = true;
             if surface.present_mode == eframe::wgpu::PresentMode::AutoNoVsync {
                 app.frame_cap = Some(cadcraft_ui_egui::gpu::FrameCap::new(240));
             }
