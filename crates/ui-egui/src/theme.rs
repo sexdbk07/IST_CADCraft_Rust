@@ -1,5 +1,5 @@
 //! Design tokens. The dark palette follows the iStCAD look (slate chrome #222831–#30363F, teal
-//! accent #55C7C0, deep navy model space #121E38); every widget reads them from here.
+//! accent #55C7C0, viewport #192429 with grid #212C34 / #34404F); every widget reads them from here.
 //!
 //! Two palettes: [`Tokens::DARK`] (the original look) and [`Tokens::LIGHT`]. The interface theme
 //! changes the chrome (title and tool bar, menus, palettes, tabs, command line, status bar,
@@ -135,11 +135,11 @@ impl Tokens {
         control: Color32::from_rgb(0x41, 0x47, 0x50),
         control_hover: Color32::from_rgb(0x4a, 0x51, 0x5b),
         border: Color32::from_rgb(0x55, 0x5b, 0x65),
-        canvas: Color32::from_rgb(0x12, 0x1e, 0x38),
-        grid_minor: Color32::from_rgb(0x1b, 0x27, 0x42),
-        grid_major: Color32::from_rgb(0x28, 0x37, 0x54),
-        axis_x: Color32::from_rgb(0x56, 0x28, 0x29),
-        axis_y: Color32::from_rgb(0x28, 0x4a, 0x2e),
+        canvas: Color32::from_rgb(0x19, 0x24, 0x29),
+        grid_minor: Color32::from_rgb(0x21, 0x2c, 0x34),
+        grid_major: Color32::from_rgb(0x34, 0x40, 0x4f),
+        axis_x: Color32::from_rgb(0x3e, 0x4e, 0x5e),
+        axis_y: Color32::from_rgb(0x3e, 0x4e, 0x5e),
         text: Color32::from_rgb(0xe8, 0xec, 0xee),
         text_dim: Color32::from_rgb(0xb7, 0xbc, 0xc5),
         text_faint: Color32::from_rgb(0x8c, 0x98, 0xa8),
@@ -152,12 +152,12 @@ impl Tokens {
         grip: Color32::from_rgb(0x2f, 0x6b, 0xff),
         grip_hot: Color32::from_rgb(0xff, 0x3b, 0x3b),
         grip_dyn: Color32::from_rgb(0x26, 0xc6, 0xe8),
-        snap: Color32::from_rgb(0x2f, 0xd0, 0x62),
+        snap: Color32::from_rgb(0x55, 0xe6, 0xa5),
         compare_this: Color32::from_rgb(0x4c, 0xd9, 0x7b),
         compare_other: Color32::from_rgb(0xff, 0x5c, 0x5c),
         compare_area: Color32::from_rgb(0xff, 0xb4, 0x3c),
-        window_stroke: Color32::from_rgb(0x6f, 0xa8, 0xff),
-        crossing_stroke: Color32::from_rgb(0x7f, 0xe0, 0x7f),
+        window_stroke: Color32::from_rgb(0xca, 0xcf, 0xd8),
+        crossing_stroke: Color32::from_rgb(0x9d, 0xaa, 0xc0),
         cmd_bg: Color32::from_rgba_premultiplied(0x37, 0x3d, 0x46, 0xf0),
         toggle_on: Color32::from_rgb(0x55, 0xc7, 0xc0),
         field: Color32::from_rgb(0x3b, 0x41, 0x4a),

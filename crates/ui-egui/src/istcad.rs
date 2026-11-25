@@ -1,28 +1,30 @@
-//! The iStCAD shell: the window layout, tool bars and status dock of iStCAD, laid over the
-//! CADCraft engine.
+//! The iStCAD shell: iStCAD's window, laid over the CADCraft engine. iStCAD (`iStCAD_1`,
+//! `MainWindow.xaml`) is the reference; sizes, colours and order follow it.
 //!
-//! Rows, top to bottom (as in iStCAD):
-//! 1. Title bar (40 pt): logo, Undo/Redo, New/Open/Save/Save As, File/Edit/View menus; the
-//!    product name and version in the middle; command search and the window buttons on the right.
-//! 2. Main tool bar (50 pt): Text Style, Dim Style and Layer pickers, then the drawing tools,
-//!    then Settings and Preferences.
-//! 3. Drawing tabs (CADCraft's file tabs).
-//! 4. The drawing area, with an auto-hide strip of the 20 most-used commands on its left edge and
+//! Rows, top to bottom:
+//! 1. Title bar, 40 pt, `#292F38`: logo, Undo/Redo, New/Open/Save/Save As, File/Edit/View; the
+//!    product name and version centred; the command search and Minimize/Maximize/Close.
+//! 2. Main tool bar, 50 pt, `#30363F` with a `#555B65` border: Text Style / Dim Style / Layer
+//!    pickers, the drawing tools, Settings and Preferences.
+//! 3. Drawing tabs, 28 pt: the drawing list button, one tab per drawing (dirty dot, name, ×), `+`.
+//! 4. The drawing area, with the auto-hide strip of the 20 most-used commands on its left edge and
 //!    the Properties palette on the right (Ctrl+1).
-//! 5. The command dock: layout tabs, New Layout and PDF on the left; OSNAP / ORTHO / POLAR /
-//!    OTRACK / DYN, drafting settings, zoom readout, zoom buttons, zoom slider and GRID on the
-//!    right.
+//! 5. The command dock, 86 pt: the command line (prompt, typed text, latest status, history
+//!    button) over the Model/layout tabs, `+` and PDF; the drafting toggles over the zoom readout,
+//!    zoom buttons, zoom slider and GRID. AutoComplete opens above the command line, the command
+//!    history above the dock.
 //!
-//! Every button acts through a registered command (`app.start` / `app.run`), so the automation
-//! interface reaches everything the shell does.
+//! Every control acts through a registered command (`app.start` / `app.run`), so the automation
+//! interface reaches everything the shell does. Typing still goes through CADCraft's command-line
+//! keyboard handling ([`crate::cmdline::keyboard`]); only its drawing moves into the dock.
 
 use std::collections::HashMap;
 
-use egui::{Color32, Rect, RichText, Sense, Stroke, pos2, vec2};
+use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 
 use crate::CadApp;
-use crate::icons::{self, Icon};
+use crate::istcad_icons::{self as glyphs, Glyph};
 use crate::theme::Tokens;
 
 /// Product name shown in the title bar and window captions.
@@ -30,48 +32,93 @@ pub const PRODUCT: &str = "IST_CADCraft";
 /// IST_CADCraft's own version (the CADCraft core version is `CARGO_PKG_VERSION`).
 pub const VERSION: &str = "1.0.0";
 
-/// Heights of the shell rows, in points (iStCAD's grid rows).
+/// Row heights, in points (iStCAD's grid rows).
 const TITLE_H: f32 = 40.0;
 const TOOLBAR_H: f32 = 50.0;
-const DOCK_H: f32 = 34.0;
+const TABS_H: f32 = 28.0;
+const DOCK_H: f32 = 86.0;
+/// Height of the command history window that opens above the dock.
+const HISTORY_H: f32 = 196.0;
 /// How many commands the auto-hide strip offers.
 const QUICK_COUNT: usize = 20;
 
-/// The commands the auto-hide strip starts with before usage ranks them.
-const QUICK_DEFAULT: &[&str] = &[
-    "line",
-    "pline",
-    "circle",
-    "arc",
-    "rectang",
-    "move",
-    "copy",
-    "erase",
-    "trim",
-    "extend",
-    "offset",
-    "rotate",
-    "scale",
-    "mirror",
-    "fillet",
-    "hatch",
-    "mtext",
-    "dimlinear",
-    "zoom.extents",
-    "select",
+/// iStCAD colours that have no theme token of their own.
+mod ink {
+    use egui::Color32;
+    /// Title-bar and file-button icon strokes.
+    pub const ICON_BRIGHT: Color32 = Color32::from_rgb(0xed, 0xf0, 0xf4);
+    /// Undo/Redo strokes.
+    pub const ICON_SOFT: Color32 = Color32::from_rgb(0xd9, 0xdc, 0xe2);
+    /// Tool-bar icon strokes and list text.
+    pub const ICON: Color32 = Color32::from_rgb(0xe1, 0xe3, 0xe8);
+    /// Labels beside the pickers.
+    pub const LABEL: Color32 = Color32::from_rgb(0xc6, 0xca, 0xd2);
+    /// The command line and search field.
+    pub const FIELD: Color32 = Color32::from_rgb(0x3b, 0x41, 0x4a);
+    /// The picker boxes.
+    pub const COMBO: Color32 = Color32::from_rgb(0x34, 0x3a, 0x43);
+    /// Drawing tabs: active / inactive fill and border.
+    pub const TAB_ON: Color32 = Color32::from_rgb(78, 85, 95);
+    pub const TAB_ON_EDGE: Color32 = Color32::from_rgb(112, 119, 129);
+    pub const TAB_OFF: Color32 = Color32::from_rgb(49, 55, 64);
+    pub const TAB_OFF_EDGE: Color32 = Color32::from_rgb(77, 84, 94);
+    /// The unsaved / saved dot on a drawing tab.
+    pub const DIRTY: Color32 = Color32::from_rgb(231, 178, 89);
+    pub const CLEAN: Color32 = Color32::from_rgb(190, 196, 205);
+    /// Layout tabs: selected / not selected, and their border.
+    pub const LAYOUT_ON: Color32 = Color32::from_rgb(86, 93, 103);
+    pub const LAYOUT_OFF: Color32 = Color32::from_rgb(65, 71, 80);
+    pub const LAYOUT_EDGE: Color32 = Color32::from_rgb(93, 100, 110);
+    /// A status toggle that is on: fill, border, text.
+    pub const TOGGLE_ON: Color32 = Color32::from_rgb(0xae, 0xb4, 0xbe);
+    pub const TOGGLE_ON_EDGE: Color32 = Color32::from_rgb(0xd2, 0xd5, 0xdb);
+    pub const TOGGLE_ON_TEXT: Color32 = Color32::from_rgb(0x29, 0x2e, 0x36);
+    /// The history window and the AutoComplete list.
+    pub const HISTORY_BG: Color32 = Color32::from_rgba_unmultiplied_const(0x18, 0x22, 0x26, 0xf2);
+    pub const HISTORY_TEXT: Color32 = Color32::from_rgb(190, 196, 205);
+    pub const LIST_EDGE: Color32 = Color32::from_rgb(0x70, 0x77, 0x80);
+    pub const LIST_DESC: Color32 = Color32::from_rgb(0x9f, 0xad, 0xb2);
+    pub const LIST_SELECTED: Color32 = Color32::from_rgb(0x5a, 0x60, 0x69);
+    /// The drawing-area frame.
+    pub const CANVAS_EDGE: Color32 = Color32::from_rgb(0x62, 0x69, 0x73);
+}
+
+/// iStCAD's frequent-command catalog (`FrequentCommandCatalog`): command, caption, icon. The
+/// auto-hide strip ranks these by use, ties keeping this order.
+const QUICK_CATALOG: &[(&str, &str, Glyph)] = &[
+    ("line", "Line", Glyph::Line),
+    ("circle", "Circle", Glyph::Circle),
+    ("rectang", "Rectangle", Glyph::Rectangle),
+    ("arc", "Arc", Glyph::Arc),
+    ("move", "Move", Glyph::Move),
+    ("copy", "Copy", Glyph::Copy),
+    ("erase", "Erase", Glyph::Erase),
+    ("select", "Select", Glyph::Select),
+    ("zoom.extents", "Zoom extents", Glyph::ZoomExtents),
+    ("zoom.previous", "Zoom previous", Glyph::Undo),
+    ("pan", "Pan", Glyph::Move),
+    ("u", "Undo", Glyph::Undo),
+    ("redo", "Redo", Glyph::Redo),
+    ("new", "New drawing", Glyph::New),
+    ("open", "Open drawing", Glyph::Open),
+    ("qsave", "Save", Glyph::Save),
+    ("saveas", "Save as", Glyph::SaveAs),
+    ("plot", "Plot / PDF", Glyph::Plot),
+    ("layout", "New layout", Glyph::Layout),
+    ("regen", "Regenerate", Glyph::Regen),
 ];
 
-/// Drawing tools of the main tool bar: icon, command, tooltip.
-const TOOLS: &[(Icon, &str, &str)] = &[
-    (Icon::SelectObjects, "select", "Select objects (S)"),
-    (Icon::Line, "line", "Draw line (L)"),
-    (Icon::Circle, "circle", "Draw circle (C)"),
-    (Icon::Arc, "arc", "Draw arc (A)"),
-    (Icon::Polyline, "pline", "Draw connected line segments (PL)"),
-    (Icon::Rectangle, "rectang", "Draw rectangle (REC)"),
-    (Icon::Move, "move", "Move selected objects (M)"),
-    (Icon::Trim, "trim", "Trim objects (TR)"),
-    (Icon::DimLinear, "dimlinear", "Add dimension (DLI)"),
+/// Drawing tools of the main tool bar: icon, stroke width, command, tooltip.
+const TOOLS: &[(Glyph, f32, &str, &str)] = &[
+    (Glyph::Select, 1.0, "select", "Select objects"),
+    (Glyph::Line, 1.5, "line", "Draw line"),
+    (Glyph::Circle, 1.35, "circle", "Draw circle"),
+    (Glyph::Arc, 1.35, "arc", "Draw arc (ARC)"),
+    (Glyph::Polyline, 1.35, "pline", "Draw connected line segments"),
+    (Glyph::Rectangle, 1.35, "rectang", "Draw rectangle (RECTANGLE)"),
+    (Glyph::Move, 1.2, "move", "Move selected objects (MOVE)"),
+    (Glyph::Trim, 1.2, "trim", "Trim objects"),
+    (Glyph::Dimension, 1.2, "dimlinear", "Add dimension"),
 ];
 
 /// Shell state kept by [`CadApp`].
@@ -90,6 +137,8 @@ pub struct Shell {
     quick_open: bool,
     /// The view height each drawing first showed, the 100 % mark of the zoom readout.
     zoom_ref: HashMap<String, f64>,
+    /// The window caption last sent, so it is only sent again when it changes.
+    caption: String,
 }
 
 impl Shell {
@@ -105,68 +154,17 @@ impl Shell {
         }
     }
 
-    /// The auto-hide strip's commands: the most used first, filled up from [`QUICK_DEFAULT`].
-    pub fn ranked(&self) -> Vec<String> {
-        let mut used: Vec<(&String, &u32)> = self.usage.iter().filter(|(id, _)| quick_icon(id).is_some()).collect();
-        used.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-        let mut out: Vec<String> = used.into_iter().map(|(id, _)| id.clone()).collect();
-        for id in QUICK_DEFAULT {
-            if out.len() >= QUICK_COUNT {
-                break;
-            }
-            if !out.iter().any(|o| o == id) {
-                out.push((*id).to_string());
-            }
-        }
-        out.truncate(QUICK_COUNT);
-        out
+    /// How often `id` was started this session.
+    pub fn uses(&self, id: &str) -> u32 {
+        self.usage.get(id).copied().unwrap_or(0)
     }
-}
 
-/// The icon the auto-hide strip shows for a command, `None` for commands it doesn't offer.
-fn quick_icon(id: &str) -> Option<Icon> {
-    Some(match id {
-        "line" => Icon::Line,
-        "pline" => Icon::Polyline,
-        "circle" => Icon::Circle,
-        "arc" => Icon::Arc,
-        "rectang" => Icon::Rectangle,
-        "polygon" => Icon::Polygon,
-        "ellipse" => Icon::Ellipse,
-        "spline" => Icon::Spline,
-        "point" => Icon::Point,
-        "xline" => Icon::XLine,
-        "hatch" => Icon::Hatch,
-        "text" => Icon::Text,
-        "mtext" => Icon::MText,
-        "move" => Icon::Move,
-        "copy" => Icon::Copy,
-        "rotate" => Icon::Rotate,
-        "scale" => Icon::Scale,
-        "mirror" => Icon::Mirror,
-        "offset" => Icon::Offset,
-        "trim" => Icon::Trim,
-        "extend" => Icon::Extend,
-        "fillet" => Icon::Fillet,
-        "chamfer" => Icon::Chamfer,
-        "explode" => Icon::Explode,
-        "erase" => Icon::Erase,
-        "stretch" => Icon::Stretch,
-        "join" => Icon::Join,
-        "matchprop" => Icon::MatchProp,
-        "dimlinear" => Icon::DimLinear,
-        "dimaligned" => Icon::DimAligned,
-        "dimradius" => Icon::DimRadius,
-        "dimangular" => Icon::DimAngular,
-        "insert" => Icon::Insert,
-        "zoom.extents" => Icon::ZoomExtents,
-        "zoom.window" => Icon::ZoomWindow,
-        "select" => Icon::SelectObjects,
-        "dist" => Icon::Distance,
-        "area" => Icon::Area,
-        "list" => Icon::List,
-        _ => return None,
-    })
+    /// The auto-hide strip's commands: [`QUICK_CATALOG`] by use, ties in catalog order.
+    pub fn ranked(&self) -> Vec<&'static str> {
+        let mut items: Vec<(usize, &'static str)> = QUICK_CATALOG.iter().enumerate().map(|(i, c)| (i, c.0)).collect();
+        items.sort_by(|a, b| self.uses(b.1).cmp(&self.uses(a.1)).then(a.0.cmp(&b.0)));
+        items.into_iter().map(|(_, id)| id).take(QUICK_COUNT).collect()
+    }
 }
 
 /// UI commands the shell adds: `perf` (iStCAD's PERF report) and `ui.istcad.*`.
@@ -203,6 +201,55 @@ fn perf(app: &mut CadApp) -> Value {
     })
 }
 
+// ---------------------------------------------------------------- shared controls
+
+/// What an [`icon_button`] draws: the glyph, its colour, its stroke width (at a 24-point icon)
+/// and its size in points.
+#[derive(Clone, Copy)]
+struct IconLook {
+    glyph: Glyph,
+    color: Color32,
+    stroke: f32,
+    icon: f32,
+}
+
+/// A flat icon button in iStCAD's `ToolButton` style: transparent, `#4A515B` on hover or when
+/// `selected`, corner radius 3.
+fn icon_button(ui: &mut egui::Ui, size: egui::Vec2, look: IconLook, tip: &str, selected: bool) -> egui::Response {
+    let t = Tokens::get();
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    if selected || resp.hovered() {
+        ui.painter().rect_filled(rect, 3.0, t.control_hover);
+    }
+    glyphs::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(look.icon, look.icon)), look.glyph, look.color, look.stroke);
+    crate::icons::describe_control(ui, &resp, tip, if selected { Some(true) } else { None }, false);
+    resp.on_hover_text(crate::i18n::t(tip))
+}
+
+fn look(glyph: Glyph, color: Color32, stroke: f32, icon: f32) -> IconLook {
+    IconLook { glyph, color, stroke, icon }
+}
+
+/// A flat text button (menus, window buttons, zoom buttons).
+fn text_button(ui: &mut egui::Ui, size: egui::Vec2, text: &str, font: f32, tip: &str) -> egui::Response {
+    let t = Tokens::get();
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 3.0, t.control_hover);
+    }
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, FontId::proportional(font), t.text);
+    crate::icons::describe_control(ui, &resp, text, None, false);
+    resp.on_hover_text(crate::i18n::t(tip))
+}
+
+/// A 1-point vertical rule `h` tall, with `after` points of space after it.
+fn rule(ui: &mut egui::Ui, h: f32, after: f32) {
+    let t = Tokens::get();
+    let (r, _) = ui.allocate_exact_size(vec2(1.0, h), Sense::hover());
+    ui.painter().rect_filled(r, 0.0, t.border);
+    ui.add_space(after);
+}
+
 // ---------------------------------------------------------------- title bar
 
 /// Row 1: logo, quick file/edit buttons, menus, title, search and window buttons.
@@ -214,83 +261,93 @@ pub fn title_bar(app: &mut CadApp, ui: &mut egui::Ui) {
         if app.istcad.custom_frame || app.integrated_titlebar {
             craft_window::title_bar::empty_area(ui, r);
         }
-        paint_title(app, ui, r, t);
+        paint_title(ui, r, t);
+        sync_caption(app, ui.ctx());
         // macOS draws its traffic lights at the top left of the window.
         let inset = if app.integrated_titlebar { 84.0 } else { 12.0 };
         let left = Rect::from_min_max(pos2(r.left() + inset, r.top()), pos2(r.center().x - 90.0, r.bottom()));
         ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
             ui.horizontal_centered(|ui| title_left_controls(app, ui, t));
         });
-        let controls_w = if app.istcad.custom_frame { 3.0 * 42.0 + 8.0 } else { 8.0 };
         let right = Rect::from_min_max(pos2(r.center().x + 90.0, r.top()), pos2(r.right() - 8.0, r.bottom()));
         ui.scope_builder(egui::UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)), |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
             if app.istcad.custom_frame {
-                window_buttons(ui, t);
-            } else {
-                ui.add_space(controls_w);
+                window_buttons(ui);
             }
             search_box(app, ui, t);
         });
     });
 }
 
-/// The logo mark of iStCAD (an isometric cube in a rounded tile) at `rect`.
+/// iStCAD's logo (an isometric cube on a rounded tile), 30 points.
 fn paint_logo(p: &egui::Painter, rect: Rect, t: Tokens) {
     let s = rect.width() / 32.0;
     let at = |x: f32, y: f32| pos2(rect.left() + x * s, rect.top() + y * s);
     p.rect(rect, 6.0 * s, Color32::from_rgb(0x20, 0x28, 0x32), Stroke::new(1.0, Color32::from_rgb(0x5e, 0x6a, 0x75)), egui::StrokeKind::Inside);
     let teal = Stroke::new(1.65 * s, t.icon_accent);
-    let hex = [at(6.0, 8.0), at(16.0, 3.0), at(26.0, 8.0), at(26.0, 21.0), at(16.0, 27.0), at(6.0, 21.0), at(6.0, 8.0)];
-    p.line(hex.to_vec(), teal);
+    p.add(egui::Shape::closed_line(vec![at(6.0, 8.0), at(16.0, 3.0), at(26.0, 8.0), at(26.0, 21.0), at(16.0, 27.0), at(6.0, 21.0)], teal));
     p.line(vec![at(6.0, 8.0), at(16.0, 14.0), at(26.0, 8.0)], teal);
     p.line_segment([at(16.0, 14.0), at(16.0, 27.0)], teal);
-    let ink = Stroke::new(1.3 * s, t.text);
-    p.line(vec![at(11.0, 11.0), at(16.0, 14.0), at(21.0, 11.0)], ink);
-    p.line_segment([at(16.0, 14.0), at(16.0, 21.0)], ink);
+    let white = Stroke::new(1.3 * s, t.text);
+    p.line(vec![at(11.0, 11.0), at(16.0, 14.0), at(21.0, 11.0)], white);
+    p.line_segment([at(16.0, 14.0), at(16.0, 21.0)], white);
     p.circle_filled(at(26.3, 5.7), 1.7 * s, t.icon_point);
 }
 
-/// The product name and version, centred, with the current drawing after it.
-fn paint_title(app: &CadApp, ui: &egui::Ui, r: Rect, t: Tokens) {
+/// "IST_CADCraft" (14 pt) and " v1.0.0" (9 pt, `#A7AEB8`), centred.
+fn paint_title(ui: &egui::Ui, r: Rect, t: Tokens) {
     let p = ui.painter();
-    let name = p.layout_no_wrap(PRODUCT.to_string(), egui::FontId::proportional(14.0), t.text);
-    let ver = p.layout_no_wrap(format!(" v{VERSION}"), egui::FontId::proportional(9.0), t.text_dim);
-    let doc = match app.session.state() {
-        Ok(st) if !app.ui.start_tab => format!("  —  {}", st.title),
-        _ => String::new(),
-    };
-    let doc = p.layout_no_wrap(doc, egui::FontId::proportional(12.0), t.text_dim);
-    let w = name.size().x + ver.size().x + doc.size().x;
-    let x = r.center().x - w / 2.0;
-    let y = r.center().y - name.size().y / 2.0;
-    let (nw, vw) = (name.size().x, ver.size().x);
+    let name = p.layout_no_wrap(PRODUCT.to_string(), FontId::proportional(14.0), t.text);
+    let ver = p.layout_no_wrap(format!(" v{VERSION}"), FontId::proportional(9.0), t.canvas_ink);
+    let (nw, vw, nh) = (name.size().x, ver.size().x, name.size().y);
+    let x = r.center().x - (nw + vw) / 2.0;
+    let y = r.center().y - nh / 2.0;
     p.galley(pos2(x, y), name, t.text);
-    p.galley(pos2(x + nw, y + 3.0), ver, t.text_dim);
-    p.galley(pos2(x + nw + vw, y + 1.0), doc, t.text_dim);
+    p.galley(pos2(x + nw, y + 4.0), ver, t.canvas_ink);
+}
+
+/// The OS window caption names the drawing, as iStCAD's does.
+fn sync_caption(app: &mut CadApp, ctx: &egui::Context) {
+    let caption = match app.session.state() {
+        Ok(st) if !app.ui.start_tab => format!("{} — {PRODUCT}", st.title),
+        _ => PRODUCT.to_string(),
+    };
+    if caption != app.istcad.caption {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(caption.clone()));
+        app.istcad.caption = caption;
+    }
 }
 
 fn title_left_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     let (logo, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
     paint_logo(ui.painter(), logo, t);
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     let mut run = None;
-    for (icon, cmd, tip) in [(Icon::Undo, "u", "Undo (Ctrl+Z)"), (Icon::Redo, "redo", "Redo (Ctrl+Y)")] {
-        if icons::button(ui, icon, 26.0, tip, false).clicked() {
-            run = Some(cmd);
-        }
+    // Undo/Redo: 18-point paths in a 21-unit box, 1.5-point strokes.
+    let soft = |g| look(g, ink::ICON_SOFT, 1.5 * 24.0 / 21.0, 18.0);
+    if icon_button(ui, vec2(26.0, 26.0), soft(Glyph::Undo), "Undo", false).clicked() {
+        run = Some("u");
     }
-    separator(ui, t);
-    for (icon, cmd, tip) in [
-        (Icon::New, "new", "New drawing (Ctrl+N)"),
-        (Icon::Open, "open", "Open drawing (Ctrl+O)"),
-        (Icon::Save, "qsave", "Save drawing (Ctrl+S)"),
-        (Icon::SaveAs, "saveas", "Save drawing as a new file"),
+    if icon_button(ui, vec2(26.0, 26.0), soft(Glyph::Redo), "Redo", false).clicked() {
+        run = Some("redo");
+    }
+    ui.add_space(6.0);
+    rule(ui, 22.0, 5.0);
+    for (glyph, cmd, tip) in [
+        (Glyph::New, "new", "New drawing (Ctrl+N)"),
+        (Glyph::Open, "open", "Open drawing (Ctrl+O)"),
+        (Glyph::Save, "qsave", "Save drawing (Ctrl+S)"),
+        (Glyph::SaveAs, "saveas", "Save drawing as a new file"),
     ] {
-        if icons::button(ui, icon, 29.0, tip, false).clicked() {
+        // 24-unit paths fitted to 18 points with 1.65-unit strokes.
+        if icon_button(ui, vec2(29.0, 29.0), look(glyph, ink::ICON_BRIGHT, 1.65, 18.0), tip, false).clicked() {
             run = Some(cmd);
         }
     }
-    separator(ui, t);
+    ui.add_space(5.0);
+    rule(ui, 22.0, 0.0);
     for menu in ["File", "Edit", "View"] {
         menu_button(app, ui, menu);
     }
@@ -302,15 +359,10 @@ fn title_left_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     }
 }
 
-fn separator(ui: &mut egui::Ui, t: Tokens) {
-    let (r, _) = ui.allocate_exact_size(vec2(9.0, 22.0), Sense::hover());
-    ui.painter().vline(r.center().x, r.y_range(), Stroke::new(1.0, t.border));
-}
-
-/// One of the File / Edit / View menus: the registry's commands placed directly under that menu,
-/// in registry order, plus the interface's own commands placed there.
+/// One of the File / Edit / View menus (60 × 28): the registry's commands placed directly under
+/// that menu, in registry order, plus the interface's own commands placed there.
 fn menu_button(app: &mut CadApp, ui: &mut egui::Ui, menu: &str) {
-    let resp = ui.add(egui::Button::new(RichText::new(crate::i18n::t(menu)).size(13.0)).frame(false).min_size(vec2(52.0, 28.0)));
+    let resp = text_button(ui, vec2(60.0, 28.0), crate::i18n::t(menu), 13.0, &format!("{menu} menu"));
     let mut chosen = None;
     egui::Popup::menu(&resp).show(|ui| {
         ui.set_min_width(220.0);
@@ -341,22 +393,20 @@ fn menu_entries(menu: &str) -> Vec<(&'static str, &'static str)> {
     out
 }
 
-/// Minimize, Maximize/Restore and Close, for a window without an OS title bar.
-fn window_buttons(ui: &mut egui::Ui, t: Tokens) {
+/// Minimize, Maximize/Restore and Close (42 points wide each), for a window without an OS frame.
+fn window_buttons(ui: &mut egui::Ui) {
     let maximized = ui.input(|i| i.viewport().maximized).unwrap_or(false);
-    let button = |ui: &mut egui::Ui, text: &str, tip: &str, size: f32| {
-        ui.add(egui::Button::new(RichText::new(text).size(size).color(t.text)).frame(false).min_size(vec2(42.0, 32.0)))
-            .on_hover_text(crate::i18n::t(tip))
-    };
-    if button(ui, "×", "Close", 22.0).clicked() {
+    if text_button(ui, vec2(42.0, 40.0), "×", 28.0, "Close").clicked() {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
     }
-    if button(ui, if maximized { "❐" } else { "□" }, if maximized { "Restore" } else { "Maximize" }, 16.0).clicked() {
+    let (glyph, tip) = if maximized { ("❐", "Restore") } else { ("□", "Maximize") };
+    if text_button(ui, vec2(42.0, 40.0), glyph, 21.0, tip).clicked() {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }
-    if button(ui, "—", "Minimize", 14.0).clicked() {
+    if text_button(ui, vec2(42.0, 40.0), "—", 16.0, "Minimize").clicked() {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
     }
+    ui.add_space(8.0);
 }
 
 /// Commands whose name, label or alias contains `query`, best matches first.
@@ -386,10 +436,21 @@ pub fn search_commands(query: &str) -> Vec<(&'static str, &'static str)> {
     hits.into_iter().take(12).map(|(_, id, label)| (id, label)).collect()
 }
 
-/// The title bar's command search: typing lists matching commands; Enter or a click runs one.
+/// The search host (218 × 34, `#3B414A`, radius 5): a magnifier and the query. Typing lists
+/// matching commands below it; Enter or a click runs one.
 fn search_box(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
-    let edit = egui::TextEdit::singleline(&mut app.istcad.search).hint_text(format!("⌕ {}", crate::tl!("Search..."))).desired_width(200.0);
-    let resp = ui.add(edit).on_hover_text(crate::tl!("Search commands and tools"));
+    let (host, _) = ui.allocate_exact_size(vec2(218.0, 34.0), Sense::hover());
+    ui.painter().rect_filled(host, 5.0, ink::FIELD);
+    let lens = Rect::from_center_size(pos2(host.left() + 22.0, host.center().y), vec2(18.0, 18.0));
+    glyphs::paint(ui.painter(), lens, Glyph::ZoomExtents, t.text_dim, 1.6);
+    let field = Rect::from_min_max(pos2(host.left() + 40.0, host.top() + 4.0), pos2(host.right() - 10.0, host.bottom() - 4.0));
+    let edit = egui::TextEdit::singleline(&mut app.istcad.search)
+        .hint_text(crate::tl!("Search..."))
+        .frame(egui::Frame::NONE)
+        .text_color(ink::LABEL)
+        .desired_width(field.width())
+        .vertical_align(egui::Align::Center);
+    let resp = ui.put(field, edit).on_hover_text(crate::tl!("Search commands and tools"));
     let hits = search_commands(&app.istcad.search);
     let mut run = None;
     if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -400,21 +461,17 @@ fn search_box(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     let keep = ui.data(|d| d.get_temp::<bool>(keep_id)).unwrap_or(false);
     let mut over = false;
     if (resp.has_focus() || keep) && !hits.is_empty() {
-        let at = resp.rect.left_bottom() + vec2(0.0, 4.0);
+        let at = host.left_bottom() + vec2(0.0, 4.0);
         egui::Area::new(ui.id().with("ist_search_hits")).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
-            egui::Frame::NONE.fill(t.list_bg).stroke(Stroke::new(1.0, t.border)).corner_radius(5).inner_margin(egui::Margin::same(4)).show(
-                ui,
-                |ui| {
-                    ui.set_width(resp.rect.width().max(280.0));
-                    for (id, label) in &hits {
-                        let text = format!("{}   {}", id.to_ascii_uppercase(), crate::i18n::t(label));
-                        if ui.add(egui::Button::selectable(false, text).truncate()).clicked() {
-                            run = Some(*id);
-                        }
+            list_frame().show(ui, |ui| {
+                ui.set_width(host.width().max(300.0));
+                for (id, label) in &hits {
+                    if suggestion_row(ui, &id.to_ascii_uppercase(), crate::i18n::t(label), false).clicked() {
+                        run = Some(*id);
                     }
-                    over = ui.rect_contains_pointer(ui.min_rect().expand(6.0));
-                },
-            );
+                }
+                over = ui.rect_contains_pointer(ui.min_rect().expand(6.0));
+            });
         });
     }
     ui.data_mut(|d| d.insert_temp(keep_id, over && run.is_none()));
@@ -424,24 +481,42 @@ fn search_box(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     }
 }
 
-/// Edge zones that resize a window without an OS frame.
+/// The frame of iStCAD's command lists (`#343A43`, `#707780` border, radius 5, padding 2).
+fn list_frame() -> egui::Frame {
+    let t = Tokens::get();
+    egui::Frame::NONE.fill(t.list_bg).stroke(Stroke::new(1.0, ink::LIST_EDGE)).corner_radius(5).inner_margin(egui::Margin::same(2))
+}
+
+/// One row of a command list: the name (130-point column) and its description; `selected` rows
+/// are `#5A6069`.
+fn suggestion_row(ui: &mut egui::Ui, name: &str, description: &str, selected: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
+    if selected || resp.hovered() {
+        ui.painter().rect_filled(rect, 2.0, if selected { ink::LIST_SELECTED } else { Tokens::get().control_hover });
+    }
+    let p = ui.painter().with_clip_rect(rect);
+    p.text(pos2(rect.left() + 9.0, rect.center().y), Align2::LEFT_CENTER, name, FontId::proportional(13.0), Color32::WHITE);
+    p.text(pos2(rect.left() + 139.0, rect.center().y), Align2::LEFT_CENTER, description, FontId::proportional(12.0), ink::LIST_DESC);
+    crate::icons::describe_control(ui, &resp, name, Some(selected), false);
+    resp.on_hover_text(description)
+}
+
+/// Edge zones that resize a window without an OS frame (the bottom and right edges, as iStCAD's
+/// `ResizeBorderThickness="0,0,6,6"`, plus the left edge and the bottom corners).
 pub fn resize_edges(app: &CadApp, ctx: &egui::Context) {
     if !app.istcad.custom_frame || ctx.input(|i| i.viewport().maximized.unwrap_or(false) || i.viewport().fullscreen.unwrap_or(false)) {
         return;
     }
     let r = ctx.content_rect();
     let Some(p) = ctx.input(|i| i.pointer.hover_pos()) else { return };
-    const EDGE: f32 = 5.0;
-    let (l, rt, tp, b) = (p.x - r.left() < EDGE, r.right() - p.x < EDGE, p.y - r.top() < EDGE, r.bottom() - p.y < EDGE);
+    const EDGE: f32 = 6.0;
+    let (l, rt, b) = (p.x - r.left() < EDGE, r.right() - p.x < EDGE, r.bottom() - p.y < EDGE);
     use egui::{CursorIcon, ResizeDirection as D};
-    let dir = match (l, rt, tp, b) {
-        (true, _, true, _) => Some((D::NorthWest, CursorIcon::ResizeNorthWest)),
-        (_, true, true, _) => Some((D::NorthEast, CursorIcon::ResizeNorthEast)),
-        (true, _, _, true) => Some((D::SouthWest, CursorIcon::ResizeSouthWest)),
-        (_, true, _, true) => Some((D::SouthEast, CursorIcon::ResizeSouthEast)),
+    let dir = match (l, rt, b) {
+        (true, _, true) => Some((D::SouthWest, CursorIcon::ResizeSouthWest)),
+        (_, true, true) => Some((D::SouthEast, CursorIcon::ResizeSouthEast)),
         (true, ..) => Some((D::West, CursorIcon::ResizeWest)),
-        (_, true, ..) => Some((D::East, CursorIcon::ResizeEast)),
-        (_, _, true, _) => Some((D::North, CursorIcon::ResizeNorth)),
+        (_, true, _) => Some((D::East, CursorIcon::ResizeEast)),
         (.., true) => Some((D::South, CursorIcon::ResizeSouth)),
         _ => None,
     };
@@ -455,28 +530,37 @@ pub fn resize_edges(app: &CadApp, ctx: &egui::Context) {
 
 // ---------------------------------------------------------------- main tool bar
 
-/// Row 2: style and layer pickers, drawing tools, settings.
+/// Row 2: style and layer pickers, a rule, the drawing tools, then Settings and Preferences.
 pub fn main_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
     if !app.ui.show_toolbar {
         return;
     }
     let t = Tokens::get();
-    let frame = egui::Frame::NONE.fill(t.chrome).stroke(Stroke::new(1.0, t.border)).corner_radius(5).inner_margin(egui::Margin::symmetric(8, 0));
+    let frame = egui::Frame::NONE.fill(t.chrome).stroke(Stroke::new(1.0, t.border)).corner_radius(5).inner_margin(egui::Margin {
+        left: 8,
+        right: 8,
+        top: 0,
+        bottom: 1,
+    });
     egui::Panel::top("ist_toolbar").exact_size(TOOLBAR_H).frame(frame).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.horizontal_centered(|ui| {
             pickers(app, ui, t);
-            separator(ui, t);
+            rule(ui, 30.0, 8.0);
+            // The running command's tool is highlighted; Select when nothing runs.
+            let running = app.session.running.as_ref().map(|r| r.id.clone()).unwrap_or_else(|| "select".into());
             let mut run = None;
-            for (icon, cmd, tip) in TOOLS {
-                if icons::button(ui, *icon, 32.0, tip, false).clicked() {
+            for (glyph, width, cmd, tip) in TOOLS {
+                if icon_button(ui, vec2(38.0, 36.0), look(*glyph, ink::ICON, *width, 22.0), tip, running == *cmd).clicked() {
                     run = Some(*cmd);
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icons::button(ui, Icon::Gear, 32.0, "Preferences", false).clicked() {
+                ui.add_space(3.0);
+                if icon_button(ui, vec2(38.0, 36.0), look(Glyph::Preferences, ink::ICON, 1.3, 22.0), "Preferences", false).clicked() {
                     run = Some("options");
                 }
-                if icons::button(ui, Icon::Gear, 32.0, "Settings — drafting settings", false).clicked() {
+                if icon_button(ui, vec2(38.0, 36.0), look(Glyph::Settings, ink::ICON, 1.25, 22.0), "Settings", false).clicked() {
                     run = Some("ui.dialog.dsettings");
                 }
             });
@@ -487,71 +571,249 @@ pub fn main_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
     });
 }
 
-/// Text Style, Dim Style and Layer: each lists the drawing's table and makes the pick current.
+/// One picker of the main tool bar.
+struct Picker<'a> {
+    label: &'static str,
+    id: &'static str,
+    items: &'a [String],
+    current: &'a str,
+    width: f32,
+    command: &'static str,
+    tip: &'static str,
+}
+
+/// Text Style, Dim Style and Layer: a label and a `ComboLike` box each. The box lists the
+/// drawing's table; a pick becomes current.
 fn pickers(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
-    let Ok(doc) = app.session.doc() else {
-        ui.label(RichText::new(crate::tl!("No drawing open")).color(t.text_dim));
-        return;
-    };
-    let text_styles: Vec<String> = doc.text_styles.iter().map(|s| s.name.clone()).collect();
-    let dim_styles: Vec<String> = doc.dim_styles.iter().map(|s| s.name.clone()).collect();
-    let layers: Vec<String> = doc.layers.iter().map(|l| l.name.clone()).collect();
-    let cur_text = doc.header.str("TEXTSTYLE", "Standard");
-    let cur_dim = doc.header.str("DIMSTYLE", "Standard");
-    let cur_layer = doc.header.str("CLAYER", "0");
+    let doc = app.session.doc().ok();
+    let text_styles: Vec<String> = doc.map(|d| d.text_styles.iter().map(|s| s.name.clone()).collect()).unwrap_or_default();
+    let dim_styles: Vec<String> = doc.map(|d| d.dim_styles.iter().map(|s| s.name.clone()).collect()).unwrap_or_default();
+    let layers: Vec<String> = doc.map(|d| d.layers.iter().map(|l| l.name.clone()).collect()).unwrap_or_default();
+    // With no drawing open the boxes show iStCAD's placeholders.
+    let cur_text = doc.map_or_else(|| "Standard".to_string(), |d| d.header.str("TEXTSTYLE", "Standard"));
+    let cur_dim = doc.map_or_else(|| "ISO-25".to_string(), |d| d.header.str("DIMSTYLE", "Standard"));
+    let cur_layer = doc.map_or_else(|| "ByLayer".to_string(), |d| d.header.str("CLAYER", "0"));
+    let all = [
+        Picker {
+            label: "Text Style",
+            id: "ist_textstyle",
+            items: &text_styles,
+            current: &cur_text,
+            width: 112.0,
+            command: "style.current",
+            tip: "Choose text style",
+        },
+        Picker {
+            label: "Dim Style",
+            id: "ist_dimstyle",
+            items: &dim_styles,
+            current: &cur_dim,
+            width: 96.0,
+            command: "dimstyle.current",
+            tip: "Choose dimension style",
+        },
+        Picker {
+            label: "Layer",
+            id: "ist_layer",
+            items: &layers,
+            current: &cur_layer,
+            width: 104.0,
+            command: "layer.current",
+            tip: "Choose current layer",
+        },
+    ];
     let mut pick: Option<(&str, String)> = None;
-    for (label, id, items, current, width, cmd) in [
-        ("Text Style", "ist_textstyle", &text_styles, &cur_text, 112.0, "style.current"),
-        ("Dim Style", "ist_dimstyle", &dim_styles, &cur_dim, 96.0, "dimstyle.current"),
-        ("Layer", "ist_layer", &layers, &cur_layer, 120.0, "layer.current"),
-    ] {
-        ui.label(RichText::new(crate::i18n::t(label)).color(t.text_dim));
-        egui::ComboBox::from_id_salt(id).selected_text(current.as_str()).width(width).show_ui(ui, |ui| {
-            for name in items {
-                if ui.add(egui::Button::selectable(name == current, name.as_str())).clicked() && name != current {
-                    pick = Some((cmd, name.clone()));
-                }
-            }
-        });
-        ui.add_space(6.0);
+    for picker in &all {
+        if let Some(name) = picker_box(ui, picker, t) {
+            pick = Some((picker.command, name));
+        }
     }
     if let Some((cmd, name)) = pick {
         let _ = app.run(cmd, json!({ "name": name }));
     }
 }
 
-// ---------------------------------------------------------------- auto-hide strip
+/// One `ComboLike` picker: `#343A43`, `#555B65` border, radius 3, the value and "⌄". Returns the
+/// name picked from its list, if another one was.
+fn picker_box(ui: &mut egui::Ui, picker: &Picker, t: Tokens) -> Option<String> {
+    ui.add_space(3.0);
+    ui.label(RichText::new(crate::i18n::t(picker.label)).size(13.0).color(ink::LABEL));
+    ui.add_space(8.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(picker.width, 30.0), Sense::click());
+    let fill = if resp.hovered() { t.control } else { ink::COMBO };
+    ui.painter().rect(rect, 3.0, fill, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    let p = ui.painter().with_clip_rect(rect.shrink(1.0));
+    p.text(pos2(rect.left() + 9.0, rect.center().y), Align2::LEFT_CENTER, picker.current, FontId::proportional(13.0), t.text);
+    p.text(pos2(rect.right() - 9.0, rect.center().y - 2.0), Align2::RIGHT_CENTER, "⌄", FontId::proportional(13.0), t.text);
+    crate::icons::describe_control(ui, &resp, picker.label, None, false);
+    let resp = resp.on_hover_text(crate::i18n::t(picker.tip));
+    let mut picked = None;
+    egui::Popup::menu(&resp).id(egui::Id::new(picker.id)).show(|ui| {
+        ui.set_min_width(picker.width);
+        if picker.items.is_empty() {
+            ui.label(RichText::new(crate::tl!("No drawing open")).color(t.text_dim));
+        }
+        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+            for name in picker.items {
+                if ui.add(egui::Button::selectable(name == picker.current, name.as_str())).clicked() {
+                    if name != picker.current {
+                        picked = Some(name.clone());
+                    }
+                    ui.close();
+                }
+            }
+        });
+    });
+    ui.add_space(8.0);
+    picked
+}
 
-/// The auto-hide strip on the drawing area's left edge: a handle that opens, on hover, a column
-/// of the 20 most-used commands.
+// ---------------------------------------------------------------- drawing tabs
+
+/// Row 3: the drawing list button, the drawing tabs and `+`, in iStCAD's tab style.
+pub fn drawing_tabs(app: &mut CadApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    egui::Panel::top("ist_tabs").exact_size(TABS_H).frame(egui::Frame::NONE.fill(t.chrome_dark)).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.horizontal(|ui| {
+            ui.set_height(TABS_H);
+            let list = icon_button(ui, vec2(48.0, 28.0), look(Glyph::Menu, Color32::WHITE, 1.5 * 24.0 / 16.0, 16.0), "Drawing tabs menu", false);
+            ui.add_space(4.0);
+            let docs: Vec<(usize, String, bool)> = app.session.docs.iter().enumerate().map(|(i, d)| (i, d.title.clone(), d.is_dirty())).collect();
+            let active = (!app.ui.start_tab).then_some(app.session.active);
+            let mut switch = None;
+            let mut close = None;
+            let mut start_page = false;
+            egui::Popup::menu(&list).show(|ui| {
+                ui.set_min_width(220.0);
+                if ui.add(egui::Button::selectable(active.is_none(), crate::tl!("Start"))).clicked() {
+                    start_page = true;
+                    ui.close();
+                }
+                for (i, title, dirty) in &docs {
+                    let text = if *dirty { format!("● {title}") } else { title.clone() };
+                    if ui.add(egui::Button::selectable(active == Some(*i), text)).clicked() {
+                        switch = Some(*i);
+                        ui.close();
+                    }
+                }
+            });
+            for (i, title, dirty) in &docs {
+                let (clicked, closed) = drawing_tab(app, ui, *i, title, *dirty, active == Some(*i));
+                if clicked {
+                    switch = Some(*i);
+                }
+                if closed {
+                    close = Some(*i);
+                }
+            }
+            if text_button(ui, vec2(30.0, 28.0), "+", 18.0, "New drawing tab").clicked() {
+                app.ui.start_tab = false;
+                app.start("new");
+            }
+            if start_page {
+                app.ui.start_tab = true;
+            }
+            if let Some(i) = switch {
+                let _ = app.run("document.switch", json!({ "index": i }));
+                app.ui.start_tab = false;
+            }
+            if let Some(i) = close {
+                app.request_close(Some(i));
+            }
+        });
+    });
+}
+
+/// The drawing name on a tab: at most 150 points, cut with "…".
+fn tab_name(ui: &egui::Ui, title: &str) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(title.to_string(), FontId::proportional(11.0), Color32::WHITE);
+    job.wrap = egui::text::TextWrapping { max_width: 150.0, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    ui.painter().layout_job(job)
+}
+
+/// One drawing tab: radius 4,4,0,0, the unsaved/saved dot (7 points), the name (11 points) and
+/// ×; inactive tabs sit 1 point lower. Returns (clicked, close clicked).
+fn drawing_tab(app: &mut CadApp, ui: &mut egui::Ui, index: usize, title: &str, dirty: bool, active: bool) -> (bool, bool) {
+    let name = tab_name(ui, title);
+    let w = 8.0 + 7.0 + 7.0 + name.size().x + 6.0 + 21.0 + 5.0;
+    let (slot, resp) = ui.allocate_exact_size(vec2(w + 3.0, TABS_H), Sense::click());
+    let top = if active { slot.top() } else { slot.top() + 1.0 };
+    let rect = Rect::from_min_max(pos2(slot.left(), top), pos2(slot.left() + w, slot.bottom()));
+    let (fill, edge) = if active { (ink::TAB_ON, ink::TAB_ON_EDGE) } else { (ink::TAB_OFF, ink::TAB_OFF_EDGE) };
+    let p = ui.painter();
+    p.rect(rect, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, fill, Stroke::NONE, egui::StrokeKind::Inside);
+    // The border runs up the left, across the top and down the right; the bottom is open.
+    let s = Stroke::new(1.0, edge);
+    p.line(
+        vec![
+            rect.left_bottom(),
+            pos2(rect.left(), rect.top() + 4.0),
+            pos2(rect.left() + 4.0, rect.top()),
+            pos2(rect.right() - 4.0, rect.top()),
+            pos2(rect.right(), rect.top() + 4.0),
+            rect.right_bottom(),
+        ],
+        s,
+    );
+    p.circle_filled(pos2(rect.left() + 8.0 + 3.5, rect.center().y), 3.5, if dirty { ink::DIRTY } else { ink::CLEAN });
+    p.galley(pos2(rect.left() + 22.0, rect.center().y - name.size().y / 2.0), name, Color32::WHITE);
+    let close_rect = Rect::from_center_size(pos2(rect.right() - 5.0 - 10.5, rect.center().y), vec2(21.0, 21.0));
+    let close = ui.interact(close_rect, ui.id().with(("ist_tab_close", index)), Sense::click());
+    if close.hovered() {
+        ui.painter().rect_filled(close_rect, 3.0, Tokens::get().control_hover);
+    }
+    ui.painter().text(close_rect.center(), Align2::CENTER_CENTER, "×", FontId::proportional(13.0), Color32::from_rgb(198, 208, 211));
+    crate::icons::describe_control(ui, &close, &format!("Close {title}"), None, false);
+    let close = close.on_hover_text(crate::tl!("Close drawing tab"));
+    crate::icons::describe_control(ui, &resp, title, Some(active), true);
+    let clicked = resp.clicked() && !close.hovered();
+    crate::shortcut_menus::attach(app, &resp, |app| crate::shortcut_menus::drawing_tab_entries(app, index));
+    (clicked, close.clicked())
+}
+
+// ---------------------------------------------------------------- drawing area
+
+/// The drawing area's 1-point `#626973` frame.
+pub fn canvas_frame(ctx: &egui::Context, area: Rect) {
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("ist_canvas_frame")));
+    p.rect_stroke(area, 0.0, Stroke::new(1.0, ink::CANVAS_EDGE), egui::StrokeKind::Inside);
+}
+
+/// The auto-hide strip on the drawing area's left edge: a 12 × 58 handle (`#4A515B`, "›") that
+/// opens, on hover, a 60-point column of the 20 most-used commands (34 × 32 buttons).
 pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
     let t = Tokens::get();
     let ranked = app.istcad.ranked();
-    let size = 34.0;
-    let open_h = (ranked.len() as f32 * (size + 2.0) + 10.0).min(area.height() - 16.0).max(58.0);
+    let open_h = (ranked.len() as f32 * 34.0 + 10.0).min(area.height() - 8.0).max(58.0);
     let (w, h) = if app.istcad.quick_open { (60.0, open_h) } else { (12.0, 58.0) };
     let rect = Rect::from_min_size(pos2(area.left(), area.center().y - h / 2.0), vec2(w, h));
     let mut run = None;
-    egui::Area::new(egui::Id::new("ist_quick_bar")).order(egui::Order::Middle).fixed_pos(rect.min).show(ctx, |ui| {
-        let frame = egui::Frame::NONE
-            .fill(if app.istcad.quick_open { t.chrome } else { t.control_hover })
-            .stroke(Stroke::new(1.0, t.border))
-            .corner_radius(egui::CornerRadius { nw: 0, sw: 0, ne: 3, se: 3 });
+    let radius = egui::CornerRadius { nw: 0, sw: 0, ne: 3, se: 3 };
+    let open = app.istcad.quick_open;
+    let shell = &app.istcad;
+    egui::Area::new(egui::Id::new("ist_quick_bar")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+        let (fill, edge) = if open { (t.chrome, t.border) } else { (t.control_hover, ink::CANVAS_EDGE) };
+        let frame = egui::Frame::NONE.fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(radius);
         frame.show(ui, |ui| {
             ui.set_min_size(rect.size());
             ui.set_max_size(rect.size());
-            if !app.istcad.quick_open {
-                ui.centered_and_justified(|ui| ui.label(RichText::new("›").size(19.0).color(t.text)));
+            if !open {
+                let r = ui.max_rect();
+                ui.painter().text(r.center(), Align2::CENTER_CENTER, "›", FontId::proportional(19.0), Color32::from_rgb(0xd0, 0xd9, 0xdb));
+                let resp = ui.interact(r, ui.id().with("ist_quick_handle"), Sense::hover());
+                crate::icons::describe_control(ui, &resp, "Show drawing toolbar", None, false);
                 return;
             }
             egui::ScrollArea::vertical().max_height(open_h - 6.0).show(ui, |ui| {
                 ui.vertical_centered(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
                     ui.add_space(4.0);
                     for id in &ranked {
-                        let Some(icon) = quick_icon(id) else { continue };
-                        let label = cadcraft_engine::cmd::find_command(id).map_or(id.as_str(), |c| c.label);
-                        if icons::button(ui, icon, size, label, false).clicked() {
-                            run = Some(id.clone());
+                        let Some((_, caption, glyph)) = QUICK_CATALOG.iter().find(|c| c.0 == *id) else { continue };
+                        let tip = format!("{} ({}) — used {} time(s)", crate::i18n::t(caption), id.to_ascii_uppercase(), shell.uses(id));
+                        if icon_button(ui, vec2(34.0, 32.0), look(*glyph, Color32::WHITE, 1.4, 20.0), &tip, false).clicked() {
+                            run = Some(*id);
                         }
                     }
                 });
@@ -559,108 +821,318 @@ pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
         });
     });
     // Open while the pointer is over the handle or the open strip.
-    let hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.expand(4.0).contains(p));
+    let hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.expand(2.0).contains(p));
     if hover != app.istcad.quick_open {
         app.istcad.quick_open = hover;
         ctx.request_repaint();
     }
     if let Some(id) = run {
-        app.start(&id);
+        app.start(id);
     }
 }
 
 // ---------------------------------------------------------------- command dock
 
-/// Row 5: layout tabs and plotting on the left, drafting toggles and zoom on the right, with the
-/// cursor coordinates or the latest message between them.
+/// Row 5, 86 points: the command line over the layout tabs (4.35 parts of the width), the
+/// drafting toggles over the zoom controls (1.05 parts).
 pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let frame =
         egui::Frame::NONE.fill(t.chrome).stroke(Stroke::new(1.0, t.cmd_border)).corner_radius(egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 });
-    egui::Panel::bottom("ist_dock").exact_size(DOCK_H).frame(frame.inner_margin(egui::Margin::symmetric(8, 0))).show(ui, |ui| {
-        ui.horizontal_centered(|ui| {
-            layout_tabs(app, ui, t);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                zoom_controls(app, ui, t);
-                ui.add_space(8.0);
-                drafting_toggles(app, ui, t);
-                ui.add_space(8.0);
-                readout(app, ui, t);
-            });
+    egui::Panel::bottom("ist_dock").exact_size(DOCK_H).frame(frame).show(ui, |ui| {
+        let r = ui.max_rect();
+        let split = r.left() + r.width() * 4.35 / 5.4;
+        let left = Rect::from_min_max(pos2(r.left() + 8.0, r.top() + 5.0), pos2(split, r.bottom() - 2.0));
+        let right = Rect::from_min_max(pos2(split + 8.0, r.top() + 5.0), pos2(r.right() - 14.0, r.bottom() - 2.0));
+        let bar = Rect::from_min_size(left.min, vec2(left.width(), 40.0));
+        let tabs_row = Rect::from_min_max(pos2(left.left() + 6.0, bar.bottom()), left.max);
+        let toggles_row = Rect::from_min_size(right.min, vec2(right.width(), 40.0));
+        let zoom_row = Rect::from_min_max(pos2(right.left() + 5.0, toggles_row.bottom()), pos2(right.right() - 3.0, right.bottom()));
+        if app.ui.show_command_line {
+            command_bar(app, ui, bar, r.top(), t);
+        }
+        row(ui, tabs_row, egui::Layout::left_to_right(egui::Align::Center), |ui| layout_tabs(app, ui));
+        row(ui, toggles_row, egui::Layout::right_to_left(egui::Align::Center), |ui| drafting_toggles(app, ui));
+        row(ui, zoom_row, egui::Layout::right_to_left(egui::Align::Center), |ui| zoom_controls(app, ui, t));
+        row(ui, zoom_row, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            for glyph in ["▧", "▣", "⚙"] {
+                ui.label(RichText::new(glyph).size(13.0).color(t.canvas_ink));
+                ui.add_space(12.0);
+            }
         });
     });
 }
 
-fn layout_tabs(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
-    let Ok(st) = app.session.state() else { return };
-    let current = match &st.space {
-        cadcraft_doc::Space::Model => "Model".to_string(),
-        cadcraft_doc::Space::Paper(n) => n.clone(),
-    };
-    let mut layouts: Vec<_> = st.doc.layouts.iter().collect();
-    layouts.sort_by_key(|l| l.tab_order);
+/// Lay out `add` inside `rect` with `layout`.
+fn row(ui: &mut egui::Ui, rect: Rect, layout: egui::Layout, add: impl FnOnce(&mut egui::Ui)) {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(layout), |ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        add(ui);
+    });
+}
+
+/// Draws one run of text after another on the command line.
+struct Line<'a> {
+    painter: egui::Painter,
+    font: FontId,
+    cy: f32,
+    x: f32,
+    _ui: std::marker::PhantomData<&'a ()>,
+}
+
+impl Line<'_> {
+    fn put(&mut self, text: String, color: Color32) -> Rect {
+        let g = self.painter.layout_no_wrap(text, self.font.clone(), color);
+        let r = Rect::from_min_size(pos2(self.x, self.cy - g.size().y / 2.0), g.size());
+        self.painter.galley(r.min, g, color);
+        self.x += r.width();
+        r
+    }
+}
+
+/// The command line (`#3B414A`, radius 5): "›", "Command:" or the running command's prompt with
+/// its clickable options, the typed text and caret, the latest status (10 points) and the history
+/// button. AutoComplete opens above it, the history window above the dock.
+fn command_bar(app: &mut CadApp, ui: &mut egui::Ui, bar: Rect, dock_top: f32, t: Tokens) {
+    let painter = ui.painter().with_clip_rect(bar);
+    painter.rect_filled(bar, 5.0, ink::FIELD);
+    let cy = bar.center().y;
+    painter.text(pos2(bar.left() + 12.0, cy), Align2::LEFT_CENTER, "›", FontId::proportional(21.0), Color32::WHITE);
+    let input_x = bar.left() + 12.0 + 26.0;
+    let mut line = Line { painter: painter.clone(), font: FontId::proportional(13.0), cy, x: input_x, _ui: std::marker::PhantomData };
+    match app.session.current_prompt() {
+        Some(pr) => {
+            if let Some(name) = app.session.running.as_ref().filter(|r| r.id != "grip").map(|r| r.id.to_ascii_uppercase()) {
+                line.put(format!("{name}  "), t.text_dim);
+            }
+            let message = if pr.raw { pr.display() } else { crate::i18n::t(&pr.message).to_string() };
+            line.put(message, Color32::WHITE);
+            if !pr.raw && !pr.keywords.is_empty() {
+                let lead = match pr.keyword_lead() {
+                    " or [" => crate::tl!(" or ["),
+                    lead => lead,
+                };
+                line.put(lead.to_string(), Color32::WHITE);
+                let count = pr.keywords.len();
+                for (i, k) in pr.keywords.iter().enumerate() {
+                    let r = line.put(k.clone(), t.cmd_keyword);
+                    let resp = ui.interact(r.expand2(vec2(1.0, 4.0)), ui.id().with(("ist_kw", i)), Sense::click());
+                    if resp.hovered() {
+                        painter.rect_filled(r.expand2(vec2(1.0, 3.0)), 2.0, t.cmd_keyword_hover.gamma_multiply(0.6));
+                    }
+                    crate::icons::describe_control(ui, &resp, k, None, false);
+                    if resp.clicked() {
+                        let _ = app.session.input(cadcraft_engine::Input::Keyword(k.clone()));
+                    }
+                    if i + 1 < count {
+                        line.put("/".into(), Color32::WHITE);
+                    }
+                }
+                line.put("]".into(), Color32::WHITE);
+            }
+            if let Some(d) = pr.default.as_ref().filter(|_| !pr.raw) {
+                line.put(format!(" <{d}>"), Color32::WHITE);
+            }
+            if !pr.raw {
+                line.put(": ".into(), Color32::WHITE);
+            }
+        }
+        None => {
+            line.put(format!("{}  ", crate::tl!("Command:")), Color32::WHITE);
+            if app.cmd.buffer.is_empty() && app.cmd.preedit.is_empty() {
+                painter.text(pos2(line.x, cy), Align2::LEFT_CENTER, crate::tl!("Type a command..."), line.font.clone(), t.text_faint);
+            }
+        }
+    }
+    let typed = line.put(app.cmd.buffer.clone(), Color32::WHITE);
+    let mut caret_x = typed.right();
+    if !app.cmd.preedit.is_empty() {
+        let r = line.put(app.cmd.preedit.clone(), Color32::WHITE);
+        painter.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, t.accent));
+        caret_x = r.right();
+    }
+    if (ui.input(|i| i.time) * 2.0).floor() as i64 % 2 == 0 {
+        painter.line_segment([pos2(caret_x + 1.0, cy - 8.0), pos2(caret_x + 1.0, cy + 8.0)], Stroke::new(1.0, Color32::WHITE));
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+    app.cmd.ime_rect = Some((bar, Rect::from_min_size(pos2(caret_x + 1.0, cy - 8.0), vec2(1.0, 16.0))));
+    // Latest status, right-aligned before the history button (at most 260 wide).
+    let expand = Rect::from_center_size(pos2(bar.right() - 12.0 - 11.0, cy), vec2(22.0, 22.0));
+    let room = (expand.left() - 16.0 - line.x).clamp(0.0, 260.0);
+    if room > 20.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(latest_status(app), FontId::proportional(10.0), Color32::WHITE);
+        job.wrap = egui::text::TextWrapping { max_width: room, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let g = painter.layout_job(job);
+        painter.galley(pos2(expand.left() - 8.0 - g.size().x, cy - g.size().y / 2.0), g, Color32::WHITE);
+    }
+    let resp = ui.interact(expand, ui.id().with("ist_cmd_expand"), Sense::click());
+    if resp.hovered() || app.cmd.expanded {
+        painter.rect_filled(expand, 3.0, t.control_hover);
+    }
+    painter.text(expand.center(), Align2::CENTER_CENTER, if app.cmd.expanded { "⌄" } else { "⌃" }, FontId::proportional(14.0), t.text);
+    crate::icons::describe_control(ui, &resp, "Command history", Some(app.cmd.expanded), false);
+    if resp.on_hover_text(crate::tl!("Expand command history upward")).clicked() {
+        app.cmd.expanded = !app.cmd.expanded;
+    }
+    if app.cmd.expanded {
+        history_window(app, ui.ctx(), pos2(bar.left(), dock_top - HISTORY_H), bar.width(), t);
+    }
+    if !app.session.prompting() {
+        autocomplete(app, ui.ctx(), pos2(input_x, bar.top() - 4.0));
+    }
+}
+
+/// The message the command line's status slot shows: the app's status for five seconds, else the
+/// latest command-history line, else "Ready".
+fn latest_status(app: &CadApp) -> String {
+    app.status
+        .as_ref()
+        .filter(|(_, at)| crate::now_ms() - at < 5000.0)
+        .map(|(m, _)| m.clone())
+        .or_else(|| app.session.log.last().cloned())
+        .unwrap_or_else(|| crate::tl!("Ready").to_string())
+}
+
+/// The command history window above the dock: "Command History" and the log, newest at the bottom.
+fn history_window(app: &CadApp, ctx: &egui::Context, at: egui::Pos2, width: f32, t: Tokens) {
+    let radius = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
+    egui::Area::new(egui::Id::new("ist_cmd_history")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+        egui::Frame::NONE
+            .fill(ink::HISTORY_BG)
+            .stroke(Stroke::new(1.0, ink::CANVAS_EDGE))
+            .corner_radius(radius)
+            .inner_margin(egui::Margin::symmetric(16, 12))
+            .show(ui, |ui| {
+                ui.set_width(width - 32.0);
+                ui.set_height(HISTORY_H - 24.0);
+                ui.label(RichText::new(crate::tl!("Command History")).size(12.0).strong().color(t.text));
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+                    for entry in &app.session.log {
+                        ui.label(RichText::new(entry).size(12.0).color(ink::HISTORY_TEXT));
+                    }
+                });
+            });
+    });
+}
+
+/// AutoComplete above the command line (430 wide): name and description per row, the first row
+/// selected (Enter or Space runs it, Tab completes it).
+fn autocomplete(app: &mut CadApp, ctx: &egui::Context, bottom_left: egui::Pos2) {
+    let sug = crate::cmdline::suggestions_for(&app.session, &app.cmd.buffer);
+    if sug.is_empty() {
+        return;
+    }
+    let h = sug.len() as f32 * 28.0 + 6.0;
+    let mut run = None;
+    egui::Area::new(egui::Id::new("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(bottom_left - vec2(0.0, h)).show(ctx, |ui| {
+        list_frame().show(ui, |ui| {
+            ui.set_width(426.0);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for (i, s) in sug.iter().enumerate() {
+                if suggestion_row(ui, &s.display, crate::i18n::t(s.label), i == 0).clicked() {
+                    run = Some(s.id.to_ascii_lowercase());
+                }
+            }
+        });
+    });
+    if let Some(id) = run {
+        app.cmd.buffer.clear();
+        app.start(&id);
+    }
+}
+
+/// Model and the layouts (radius 4, `#565D67` when selected), `+` (27 × 27) and PDF (36 × 24).
+fn layout_tabs(app: &mut CadApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
     let mut tabs = vec!["Model".to_string()];
-    tabs.extend(layouts.iter().map(|l| l.name.clone()));
+    let mut current = "Model".to_string();
+    if let Ok(st) = app.session.state() {
+        if let cadcraft_doc::Space::Paper(n) = &st.space {
+            current = n.clone();
+        }
+        let mut layouts: Vec<_> = st.doc.layouts.iter().collect();
+        layouts.sort_by_key(|l| l.tab_order);
+        tabs.extend(layouts.iter().map(|l| l.name.clone()));
+    }
     let mut switch = None;
     for name in &tabs {
-        let shown = if name == "Model" { crate::tl!("Model").to_string() } else { name.clone() };
-        let active = *name == current;
-        let text = RichText::new(shown).size(12.0).color(if active { t.text } else { t.text_dim });
-        let resp = ui.add(egui::Button::new(text).selected(active).min_size(vec2(64.0, 24.0))).on_hover_text(if name == "Model" {
-            crate::tl!("Model space").to_string()
+        let model = name == "Model";
+        let shown = if model { crate::tl!("Model").to_string() } else { name.clone() };
+        let selected = *name == current;
+        let font = FontId::proportional(12.0);
+        let g = ui.painter().layout_no_wrap(shown.clone(), font, Color32::WHITE);
+        let (rect, resp) = ui.allocate_exact_size(vec2((g.size().x + 24.0).max(64.0), 24.0), Sense::click());
+        let fill = if selected {
+            ink::LAYOUT_ON
+        } else if resp.hovered() {
+            t.control_hover
         } else {
-            name.clone()
-        });
-        if resp.clicked() && !active {
+            ink::LAYOUT_OFF
+        };
+        ui.painter().rect(rect, 4.0, fill, Stroke::new(1.0, ink::LAYOUT_EDGE), egui::StrokeKind::Inside);
+        ui.painter().galley(rect.center() - g.size() / 2.0, g, Color32::WHITE);
+        crate::icons::describe_control(ui, &resp, &shown, Some(selected), true);
+        let resp = resp.on_hover_text(if model { crate::tl!("Model space").to_string() } else { name.clone() });
+        if resp.clicked() && !selected {
             switch = Some(name.clone());
         }
         crate::shortcut_menus::attach(app, &resp, |app| crate::shortcut_menus::layout_tab_entries(app, name));
+        ui.add_space(5.0);
     }
-    if ui.add(egui::Button::new("+").min_size(vec2(26.0, 24.0))).on_hover_text(crate::tl!("Create new paper layout")).clicked()
+    ui.add_space(1.0);
+    if text_button(ui, vec2(27.0, 27.0), "+", 16.0, "Create new paper layout").clicked()
         && let Ok(v) = app.run("layout.new", json!({}))
         && let Some(n) = v.get("name").and_then(Value::as_str)
     {
         switch = Some(n.to_string());
     }
-    if ui
-        .add(egui::Button::new(RichText::new("PDF").size(10.0)).min_size(vec2(36.0, 24.0)))
-        .on_hover_text(crate::tl!("Plot or export to PDF"))
-        .clicked()
-    {
-        app.start("exportpdf");
+    ui.add_space(6.0);
+    if text_button(ui, vec2(36.0, 24.0), "PDF", 9.0, "Plot or export to PDF").clicked() {
+        app.start("plot");
     }
     if let Some(n) = switch {
         let _ = app.run("layout.set", json!({ "name": n }));
     }
 }
 
-/// A text toggle in iStCAD's status style: light fill and dark text when on.
-fn status_toggle(ui: &mut egui::Ui, t: Tokens, label: &str, on: bool, tip: &str) -> egui::Response {
-    // On: light fill with dark text (iStCAD's checked toggle), so the state never rests on colour hue alone.
-    let (fill, ink) = if on { (t.text_dim, t.chrome_dark) } else { (t.control, t.text) };
-    let button =
-        egui::Button::new(RichText::new(label).size(10.0).color(ink).strong()).fill(fill).stroke(Stroke::new(1.0, t.border)).corner_radius(3);
-    let resp = ui.add(button.min_size(vec2(0.0, 20.0))).on_hover_text(crate::i18n::t(tip));
-    icons::describe_control(ui, &resp, label, Some(on), false);
-    resp
+/// A status toggle in iStCAD's `StatusToggle` style: `#414750`, radius 3; on: `#AEB4BE` with dark
+/// text, so the state never rests on colour hue alone.
+fn status_toggle(ui: &mut egui::Ui, label: &str, on: bool, tip: &str, size: egui::Vec2, font: f32) -> egui::Response {
+    let t = Tokens::get();
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let (fill, edge, text) = if on {
+        (ink::TOGGLE_ON, ink::TOGGLE_ON_EDGE, ink::TOGGLE_ON_TEXT)
+    } else if resp.hovered() {
+        (t.border, t.border, t.text)
+    } else {
+        (t.control, t.border, t.text)
+    };
+    ui.painter().rect(rect, 3.0, fill, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, label, FontId::proportional(font), text);
+    crate::icons::describe_control(ui, &resp, label, Some(on), false);
+    resp.on_hover_text(crate::i18n::t(tip))
 }
 
-fn drafting_toggles(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
+/// OSNAP ORTHO POLAR OTRACK DYN (18 points high) and Drafting Settings, right-aligned.
+fn drafting_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
     use cadcraft_engine::snap::mode;
     let s = app.session.settings.clone();
     let mut toggle = None;
-    if icons::button(ui, Icon::Gear, 22.0, "Drafting settings", false).clicked() {
-        app.start("ui.dialog.dsettings");
+    if icon_button(ui, vec2(38.0, 36.0), look(Glyph::Settings, ink::ICON, 1.2, 22.0), "Drafting settings", false).clicked() {
+        toggle = Some("ui.dialog.dsettings");
     }
     // Right to left, so the row reads OSNAP ORTHO POLAR OTRACK DYN.
     for (label, on, cmd, tip) in [
-        ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer (F12)"),
-        ("OTRACK", s.otrack, "otrack", "Object tracking — click to toggle (F11)"),
-        ("POLAR", s.polarmode, "polar", "Polar tracking — click to toggle (F10)"),
-        ("ORTHO", s.orthomode, "ortho", "Ortho mode — click to toggle (F8)"),
-        ("OSNAP", s.osmode & mode::OFF == 0 && s.osmode != 0, "osnap", "Object Snap — click to toggle; right-click for snap modes (F3)"),
+        ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer"),
+        ("OTRACK", s.otrack, "otrack", "Object tracking — click to toggle"),
+        ("POLAR", s.polarmode, "polar", "Polar tracking — click to toggle"),
+        ("ORTHO", s.orthomode, "ortho", "Ortho mode — click to toggle"),
+        ("OSNAP", s.osmode & mode::OFF == 0 && s.osmode != 0, "osnap", "Object Snap — click to toggle; right-click to choose snap modes"),
     ] {
-        let resp = status_toggle(ui, t, label, on, tip);
+        ui.add_space(5.0);
+        let w = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(8.0), Color32::WHITE).size().x + 8.0;
+        let resp = status_toggle(ui, label, on, tip, vec2(w, 18.0), 8.0);
         if resp.clicked() {
             toggle = Some(cmd);
         }
@@ -681,12 +1153,14 @@ fn drafting_toggles(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     }
 }
 
-/// The zoom readout (100 % = how the drawing first showed), −, +, Ext., the slider and GRID.
+/// The zoom readout (100 % = the drawing's first view), −, +, Ext., the 68-point slider and GRID,
+/// laid out right to left.
 fn zoom_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     let grid = app.session.settings.gridmode;
-    if status_toggle(ui, t, "GRID", grid, "Show or hide the drawing grid (F7)").clicked() {
+    if status_toggle(ui, "GRID", grid, "Show or hide the drawing grid", vec2(38.0, 22.0), 9.0).clicked() {
         crate::menus::run_transparent(app, "grid");
     }
+    ui.add_space(4.0);
     let Ok(st) = app.session.state() else { return };
     let height = st.view().height;
     let reference = *app.istcad.zoom_ref.entry(st.title.clone()).or_insert(height);
@@ -695,25 +1169,26 @@ fn zoom_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     let mut slider = (50.0 + 12.5 * (percent / 100.0).max(1e-12).log10().clamp(-4.0, 4.0)).clamp(0.0, 100.0) as f32;
     let before = slider;
     let mut factor = None;
-    if ui.add(egui::Slider::new(&mut slider, 0.0..=100.0).show_value(false)).on_hover_text(crate::tl!("Adjust drawing zoom")).changed()
-        && slider != before
-    {
-        factor = Some(10f64.powf(f64::from(slider - before) / 12.5));
-    }
+    ui.scope(|ui| {
+        ui.spacing_mut().slider_width = 68.0;
+        if ui.add(egui::Slider::new(&mut slider, 0.0..=100.0).show_value(false)).on_hover_text(crate::tl!("Adjust drawing zoom")).changed()
+            && slider != before
+        {
+            factor = Some(10f64.powf(f64::from(slider - before) / 12.5));
+        }
+    });
+    ui.add_space(4.0);
     let mut run = None;
-    if ui
-        .add(egui::Button::new(RichText::new("Ext.").size(10.0)).min_size(vec2(40.0, 22.0)))
-        .on_hover_text(crate::tl!("Zoom to drawing extents (ZE)"))
-        .clicked()
-    {
+    if text_button(ui, vec2(45.0, 22.0), "Ext.", 9.0, "Zoom to drawing extents (ZE)").clicked() {
         run = Some("zoom.extents");
     }
-    if ui.add(egui::Button::new("+").min_size(vec2(22.0, 22.0))).on_hover_text(crate::tl!("Zoom in")).clicked() {
+    if text_button(ui, vec2(22.0, 22.0), "+", 13.0, "Zoom in").clicked() {
         run = Some("zoom.in");
     }
-    if ui.add(egui::Button::new("−").min_size(vec2(22.0, 22.0))).on_hover_text(crate::tl!("Zoom out")).clicked() {
+    if text_button(ui, vec2(22.0, 22.0), "−", 13.0, "Zoom out").clicked() {
         run = Some("zoom.out");
     }
+    ui.add_space(6.0);
     ui.label(RichText::new(format!("{percent:.0}%")).size(12.0).color(t.text)).on_hover_text(crate::tl!("Zoom level"));
     if let Some(f) = factor {
         let _ = app.run("zoom.realtime", json!({ "factor": f }));
@@ -725,40 +1200,26 @@ fn zoom_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     }
 }
 
-/// Cursor coordinates, or the latest status message for five seconds.
-fn readout(app: &CadApp, ui: &mut egui::Ui, t: Tokens) {
-    let message = app.status.as_ref().filter(|(_, at)| crate::now_ms() - at < 5000.0).map(|(m, _)| m.clone());
-    let text = message.clone().or_else(|| {
-        app.canvas.cursor.map(|c| {
-            let c = app.session.ucs_point(c);
-            let (lu, lp) = app.session.doc().map(|d| (d.header.i64("LUNITS", 2), d.header.i64("LUPREC", 4))).unwrap_or((2, 4));
-            format!("{}, {}", cadcraft_engine::units::format_distance(c.x, lu, lp), cadcraft_engine::units::format_distance(c.y, lu, lp))
-        })
-    });
-    if let Some(text) = text {
-        let color = if message.is_some() { t.warn } else { t.text_dim };
-        ui.add(egui::Label::new(RichText::new(text).size(11.0).color(color)).truncate());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn istcad_quick_bar_ranks_used_commands_first_and_stays_full() {
+    fn istcad_quick_bar_ranks_used_commands_first_in_catalog_order() {
         let mut shell = Shell::default();
         let before = shell.ranked();
         assert_eq!(before.len(), QUICK_COUNT);
+        assert_eq!(before.first(), Some(&"line"));
         for _ in 0..3 {
-            shell.note("H"); // HATCH's alias counts for HATCH
+            shell.note("RE"); // REGEN's alias counts for REGEN
         }
         shell.note("CO");
         let after = shell.ranked();
         assert_eq!(after.len(), QUICK_COUNT);
-        assert_eq!(after.first().map(String::as_str), Some("hatch"));
-        assert!(after.iter().position(|c| c == "copy") < after.iter().position(|c| c == "line"), "{after:?}");
-        assert!(after.iter().all(|c| quick_icon(c).is_some()));
+        assert_eq!(after.first(), Some(&"regen"));
+        assert!(after.iter().position(|c| *c == "copy") < after.iter().position(|c| *c == "line"), "{after:?}");
+        // Unused commands keep the catalog order among themselves.
+        assert!(after.iter().position(|c| *c == "line") < after.iter().position(|c| *c == "circle"));
     }
 
     #[test]
@@ -774,5 +1235,12 @@ mod tests {
             assert!(!menu_entries(menu).is_empty(), "{menu}");
         }
         assert!(menu_entries("Edit").iter().any(|e| e.0 == "u"));
+    }
+
+    #[test]
+    fn istcad_quick_catalog_names_real_commands() {
+        for (id, ..) in QUICK_CATALOG {
+            assert!(cadcraft_engine::cmd::find_command(id).is_some(), "{id}");
+        }
     }
 }

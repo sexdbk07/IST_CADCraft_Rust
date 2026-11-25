@@ -58,6 +58,7 @@ pub mod grip_dyn;
 pub mod i18n;
 pub mod icons;
 pub mod istcad;
+pub mod istcad_icons;
 pub mod keys;
 pub mod layers;
 pub mod managers;
@@ -1241,7 +1242,11 @@ impl CadApp {
             }
         }
         if self.ui.show_file_tabs {
-            chrome::file_tabs(self, ui);
+            if self.istcad.enabled {
+                istcad::drawing_tabs(self, ui);
+            } else {
+                chrome::file_tabs(self, ui);
+            }
         }
         let has_doc = !self.session.docs.is_empty() && !self.ui.start_tab;
         if has_doc && !self.ui.show_toolsets {
@@ -1255,6 +1260,7 @@ impl CadApp {
             }
         });
         if self.istcad.enabled && has_doc {
+            istcad::canvas_frame(ui.ctx(), central.response.rect);
             istcad::quick_bar(self, ui.ctx(), central.response.rect);
         }
         self.opening.show(ui.ctx());

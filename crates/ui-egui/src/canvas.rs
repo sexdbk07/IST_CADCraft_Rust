@@ -584,8 +584,8 @@ fn paint_pointer_overlay(frame: &mut CanvasPaint<'_>, paper_rect: Option<Rect>, 
     if !crate::parametric::take_keyboard(app) {
         crate::cmdline::keyboard(app, ui.ctx());
     }
-    // Command line overlay.
-    if app.ui.show_command_line {
+    // Command line overlay (the iStCAD shell draws the command line in its dock instead).
+    if app.ui.show_command_line && !app.istcad.enabled {
         crate::cmdline::show(app, ui, full);
     }
     // Crosshair cursor.

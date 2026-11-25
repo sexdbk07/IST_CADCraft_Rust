@@ -134,6 +134,11 @@ pub struct Suggestion {
 
 /// [`suggestions`] for what `session` can run: a Greek word that is a command of its own there (an
 /// alias, a command the drawing's LISP defines) stays as typed.
+/// AutoComplete matches for `prefix`, for a command line drawn elsewhere (the iStCAD dock).
+pub(crate) fn suggestions_for(session: &cadcraft_engine::Session, prefix: &str) -> Vec<Suggestion> {
+    suggestions_in(session, prefix)
+}
+
 fn suggestions_in(session: &cadcraft_engine::Session, prefix: &str) -> Vec<Suggestion> {
     suggestions(prefix, &|word| session.greek_word_is_a_command(word))
 }
