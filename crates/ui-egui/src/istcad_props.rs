@@ -285,18 +285,23 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
     out
 }
 
-/// One polyline's Current vertex (a list to step through) and that vertex's X and Y, as
-/// AutoCAD's palette shows them first under Geometry.
+/// One polyline's or leader's Current vertex (a list to step through) and that vertex's X and
+/// Y, as AutoCAD's palette shows them first under Geometry.
 fn vertex_rows(doc: &Drawing, handles: &[Handle], vertex: usize, units: &Units) -> Vec<PropRow> {
+    use cadcraft_engine::doc::EntityKind;
     let [h] = handles else { return Vec::new() };
-    let Some(cadcraft_engine::doc::EntityKind::LwPolyline(pl)) = doc.entity(*h).map(|e| &e.kind) else { return Vec::new() };
-    let n = pl.vertices.len();
-    let Some(v) = pl.vertices.get(vertex.min(n.saturating_sub(1))) else { return Vec::new() };
-    let index = vertex.min(n - 1);
+    let points: Vec<(f64, f64)> = match doc.entity(*h).map(|e| &e.kind) {
+        Some(EntityKind::LwPolyline(pl)) => pl.vertices.iter().map(|v| (v.p.x, v.p.y)).collect(),
+        Some(EntityKind::Leader(l)) => l.vertices.iter().map(|v| (v.x, v.y)).collect(),
+        _ => return Vec::new(),
+    };
+    let n = points.len();
+    let index = vertex.min(n.saturating_sub(1));
+    let Some(&(x, y)) = points.get(index) else { return Vec::new() };
     vec![
         PropRow::new("Current vertex", (index + 1).to_string(), Edit::Vertex(n)),
-        PropRow::new("Vertex X", units.distance(v.p.x), Edit::VertexCoord { x: true, index }),
-        PropRow::new("Vertex Y", units.distance(v.p.y), Edit::VertexCoord { x: false, index }),
+        PropRow::new("Vertex X", units.distance(x), Edit::VertexCoord { x: true, index }),
+        PropRow::new("Vertex Y", units.distance(y), Edit::VertexCoord { x: false, index }),
     ]
 }
 

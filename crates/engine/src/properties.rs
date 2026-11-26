@@ -4,7 +4,8 @@
 //! returns the same description, so the palette, Quick Properties and agents read one list.
 //!
 //! Text, MText and Dimension have their own groups; lines, circles, arcs, polylines, points,
-//! ellipses, block references and hatches have AutoCAD's Geometry (and Pattern or Misc) rows. Dimension rows are the dimension style variables,
+//! ellipses, block references and hatches have AutoCAD's Geometry (and Pattern or Misc) rows;
+//! leaders and multileaders have their Lines & Arrows or Leaders, Text and Misc rows. Dimension rows are the dimension style variables,
 //! valued as the dimension draws them (its style with its overrides); setting one stores a
 //! per-dimension override, as AutoCAD's Properties palette does (DIMOVERRIDE).
 
@@ -249,6 +250,17 @@ impl<'a> Ctx<'a> {
 
     fn text_styles(&self) -> Vec<Choice> {
         self.d.text_styles.iter().map(|t| Choice::new(json!(t.name), t.name.clone())).collect()
+    }
+
+    /// The blocks a reference can show: the drawing's named blocks, not layouts or anonymous ones.
+    fn insertable_blocks(&self) -> Vec<Choice> {
+        let mut names: Vec<&String> = self.d.blocks.keys().filter(|n| !n.starts_with('*')).collect();
+        names.sort_by_key(|n| n.to_ascii_lowercase());
+        names.into_iter().map(|n| Choice::new(json!(n), n.clone())).collect()
+    }
+
+    fn mleader_styles(&self) -> Vec<Choice> {
+        self.d.mleader_styles.iter().map(|t| Choice::new(json!(t.name), t.name.clone())).collect()
     }
 
     fn dim_styles(&self) -> Vec<Choice> {
@@ -902,11 +914,28 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
             Group {
                 name: "Misc",
                 rows: vec![
-                    c.row("name", "Name", Kind::Text, ins.iter().map(|i| json!(i.block))).read_only().quick(),
+                c.choice("name", "Name", Kind::Choice, c.insertable_blocks(), ins.iter().map(|i| json!(i.block))).quick(),
                     c.row("rotation", "Rotation", Kind::Direction, ins.iter().map(|i| n(i.rotation.to_degrees()))).quick(),
                 ],
             },
         ];
+    }
+    if let Some(ls) = all_of(ents, |k| if let EntityKind::Leader(x) = k { Some(x) } else { None }) {
+        let arrows = vec![Choice::new(json!(true), "Arrowhead"), Choice::new(json!(false), "None")];
+        return vec![
+            Group {
+                name: "Lines & Arrows",
+                rows: vec![
+                    c.choice("arrow", "Arrow", Kind::Choice, arrows, ls.iter().map(|l| json!(l.arrow))).quick(),
+                    c.choice("leaderType", "Path type", Kind::Choice, leader_types(), ls.iter().map(|l| json!(if l.spline { "spline" } else { "straight" }))),
+                ],
+            },
+            geometry(vec![c.row("vertices", "Vertices", Kind::Number, ls.iter().map(|l| json!(l.vertices.len()))).read_only()]),
+            Group { name: "Misc", rows: vec![c.choice("dimStyle", "Dim style", Kind::DimStyle, c.dim_styles(), ls.iter().map(|l| json!(l.style))).quick()] },
+        ];
+    }
+    if let Some(ms) = all_of(ents, |k| if let EntityKind::MLeader(x) = k { Some(x) } else { None }) {
+        return mleader_groups(c, ents, &ms);
     }
     if let Some(hs) = all_of(ents, |k| if let EntityKind::Hatch(x) = k { Some(x) } else { None }) {
         let patterns = std::iter::once("SOLID")
@@ -925,4 +954,64 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
         }];
     }
     Vec::new()
+}
+
+/// Straight and Spline, as a leader's Path type and a multileader's Leader type take them.
+fn leader_types() -> Vec<Choice> {
+    vec![Choice::new(json!("straight"), "Straight"), Choice::new(json!("spline"), "Spline")]
+}
+
+/// A multileader's rows, grouped as AutoCAD's palette groups them: Leaders, Text (or Block for
+/// block content), Geometry (the landing) and Misc.
+fn mleader_groups(c: &Ctx, ents: &[&Entity], ms: &[&cadcraft_doc::MLeader]) -> Vec<Group> {
+    let n = |v: f64| json!(v);
+    let kind = |m: &cadcraft_doc::MLeader| json!(if m.leaders.is_empty() { "None" } else if m.spline { "spline" } else { "straight" });
+    let mut groups = vec![Group {
+        name: "Leaders",
+        rows: vec![
+            c.choice("leaderType", "Leader type", Kind::Choice, leader_types(), ms.iter().copied().map(kind)),
+            c.row("arrowheadSize", "Arrowhead size", Kind::Distance, ms.iter().map(|m| n(m.arrow_size))),
+            c.row("horizontalLanding", "Horizontal landing", Kind::Bool, ms.iter().map(|m| json!(m.dogleg > 0.0))),
+            c.row("landingDistance", "Landing distance", Kind::Distance, ms.iter().map(|m| n(m.dogleg))),
+        ],
+    }];
+    if let Some(ts) = ms.iter().map(|m| m.text.as_ref()).collect::<Option<Vec<&MText>>>() {
+        groups.push(Group {
+            name: "Text",
+            rows: vec![
+                c.row("text", "Contents", Kind::Contents, ts.iter().map(|t| json!(t.contents))).quick(),
+                c.choice("style", "Text style", Kind::TextStyle, c.text_styles(), ts.iter().map(|t| json!(t.style))),
+                c.choice("justify", "Justification", Kind::Choice, options(MTEXT_JUSTIFY), ts.iter().map(|t| json!(mtext_justify(t.attach)))),
+                c.row("height", "Text height", Kind::Distance, ts.iter().map(|t| n(t.height))).quick(),
+                c.row("rotation", "Text rotation", Kind::Direction, ts.iter().map(|t| n(t.rotation.to_degrees()))),
+                c.row("lineSpacing", "Line space factor", Kind::Number, ts.iter().map(|t| n(t.line_spacing))),
+                c.row("width", "Text width", Kind::Distance, ts.iter().map(|t| n(t.width))),
+            ],
+        });
+    } else if let Some(bs) = ms.iter().map(|m| m.block.as_ref()).collect::<Option<Vec<&cadcraft_doc::Insert>>>() {
+        let note = "The block content can't be changed here yet.";
+        let ro = |r: Row| Row { note: Some(note.into()), ..r.read_only() };
+        groups.push(Group {
+            name: "Block",
+            rows: vec![
+                ro(c.row("sourceBlock", "Source block", Kind::Text, bs.iter().map(|b| json!(b.block)))),
+                ro(c.row("blockScale", "Block scale", Kind::Number, bs.iter().map(|b| n(b.scale.x)))),
+            ],
+        });
+    }
+    groups.push(Group {
+        name: "Geometry",
+        rows: vec![
+            c.row("landingX", "Landing X", Kind::Distance, ms.iter().map(|m| n(m.landing.x))),
+            c.row("landingY", "Landing Y", Kind::Distance, ms.iter().map(|m| n(m.landing.y))),
+        ],
+    });
+    groups.push(Group {
+        name: "Misc",
+        rows: vec![
+            c.choice("mleaderStyle", "Multileader style", Kind::Choice, c.mleader_styles(), ms.iter().map(|m| json!(m.style))).quick(),
+            annotative(c, ents),
+        ],
+    });
+    groups
 }

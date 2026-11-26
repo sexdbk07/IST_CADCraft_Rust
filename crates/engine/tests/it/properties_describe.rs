@@ -335,3 +335,52 @@ fn ellipses_polyline_vertices_and_block_scales_are_editable() {
     let rows = describe(&mut s, json!({ "handles": [i] }));
     assert_eq!((num(&rows, "Geometry", "scaleX"), num(&rows, "Geometry", "scaleY")), (2.0, 1.0));
 }
+
+#[test]
+fn leaders_and_multileaders_are_described_and_edited() {
+    let mut s = Session::new();
+    s.execute("leader", &json!({ "points": [[0, 0], [5, 5], [10, 5]] })).unwrap();
+    let l = last(&s);
+    let rows = describe(&mut s, json!({ "handles": [l] }));
+    assert_eq!(row(&rows, "Lines & Arrows", "arrow")["value"], true);
+    assert_eq!(row(&rows, "Misc", "dimStyle")["value"], "Standard");
+    let r = s.execute("properties.set", &json!({ "handles": [l], "arrow": false, "leaderType": "spline", "vertex": 2, "vertexY": 8 })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let rows = describe(&mut s, json!({ "handles": [l] }));
+    assert_eq!((row(&rows, "Lines & Arrows", "arrow")["display"].as_str(), row(&rows, "Lines & Arrows", "leaderType")["value"].as_str()), (Some("None"), Some("spline")));
+
+    s.execute("mleader", &json!({ "points": [[0, 0], [10, 10]], "text": "NOTE" })).unwrap();
+    let m = last(&s);
+    let rows = describe(&mut s, json!({ "handles": [m] }));
+    for (group, key) in [("Leaders", "arrowheadSize"), ("Text", "text"), ("Geometry", "landingX"), ("Misc", "mleaderStyle")] {
+        assert_eq!(row(&rows, group, key)["editable"], true, "{group} {key}");
+    }
+    let x0 = num(&rows, "Geometry", "landingX");
+    let r = s
+        .execute("properties.set", &json!({ "handles": [m], "landingX": x0 + 5.0, "text": "NEW", "horizontalLanding": false, "arrowheadSize": 3 }))
+        .unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let rows = describe(&mut s, json!({ "handles": [m] }));
+    assert_eq!(num(&rows, "Geometry", "landingX"), x0 + 5.0);
+    assert_eq!(row(&rows, "Text", "text")["value"], "NEW");
+    assert_eq!(row(&rows, "Leaders", "horizontalLanding")["value"], false);
+    assert_eq!(num(&rows, "Leaders", "arrowheadSize"), 3.0);
+    assert!(s.execute("properties.set", &json!({ "handles": [m], "mleaderStyle": "nope" })).is_err());
+}
+
+#[test]
+fn a_block_reference_can_show_another_block() {
+    let mut s = Session::new();
+    for name in ["A", "B"] {
+        s.execute("line", &json!({ "points": [[0, 0], [1, 0]] })).unwrap();
+        let hs = vec![last(&s)];
+        s.execute("block", &json!({ "name": name, "base": [0, 0], "handles": hs, "keep": "delete" })).unwrap();
+    }
+    s.execute("insert", &json!({ "name": "A", "at": [5, 5] })).unwrap();
+    let i = last(&s);
+    let rows = describe(&mut s, json!({ "handles": [i] }));
+    assert!(row(&rows, "Misc", "name")["options"].as_array().unwrap().iter().any(|o| o["value"] == "B"));
+    s.execute("properties.set", &json!({ "handles": [i], "name": "b" })).unwrap();
+    assert_eq!(row(&describe(&mut s, json!({ "handles": [i] })), "Misc", "name")["value"], "B");
+    assert!(s.execute("properties.set", &json!({ "handles": [i], "name": "missing" })).is_err());
+}

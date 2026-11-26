@@ -26,7 +26,9 @@ pub fn specs() -> Vec<CommandSpec> {
             "{handles?, layer?, color?, linetype?, lineweight?, ltscale?, thickness?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, annotative?, \
              <geometry fields: radius, center, start, end, text, height, rotation…>, line: startX/Y/Z?, endX/Y/Z?, length?, angle?, \
              circle and arc: centerX/Y/Z?, ellipse: centerX/Y/Z?, majorRadius?, minorRadius?, ratio?, polyline: width?, closed?, plinegen?, elevation?, \
-             vertex (1 = first) with vertexX?/vertexY?, block reference: positionX/Y/Z?, scaleX/Y/Z?, point: positionX/Y/Z?, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
+             vertex (1 = first) with vertexX?/vertexY?, block reference: name? (another block), positionX/Y/Z?, scaleX/Y/Z?, \
+             leader: dimStyle?, arrow?: bool, leaderType?: straight|spline, vertex with vertexX?/vertexY?, \
+             multileader: mleaderStyle?, leaderType?, arrowheadSize?, horizontalLanding?: bool, landingDistance?, landingX/Y?, and its text as mtext's keys, point: positionX/Y/Z?, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
              mtext: style?, justify?, lineSpacing?, lineSpacingDistance?, lineSpacingStyle?: atLeast | exactly, positionX/Y/Z?, \
              dimension: dimStyle?, textOverride?, textRotation?, textPositionX/Y?, prefix?, suffix?, altPrefix?, altSuffix?, dimScale?, precision?, \
              <dimension style variables (field or DIM* name, e.g. textHeight / DIMTXT) set as overrides of each dimension>, clearOverrides?, clear?: [variable]} \
@@ -44,7 +46,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(
                 "{handles?, type?: one of the `types` names, to describe only those objects} → {types: [{type, count}], filter?, count, \
                  groups: [{name, rows: [{key, label, kind, value, varies, display, editable, note?, overridden?, options?: [{value, label}], quick?}]}]} \
-                 (each row's `key` is the `properties.set` key that changes it; text, mtext, dimensions, lines, circles, arcs, polylines, points, ellipses, block references and hatches have their own groups)",
+                 (each row's `key` is the `properties.set` key that changes it; text, mtext, dimensions, lines, circles, arcs, polylines, points, ellipses, block references, hatches, leaders and multileaders have their own groups)",
             )
             .noundo(),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)

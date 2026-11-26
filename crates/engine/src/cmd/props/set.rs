@@ -255,6 +255,13 @@ struct Call<'a> {
     linetype: Option<String>,
     dim_style: Option<String>,
     text_style: Option<String>,
+    /// A multileader style, checked to exist.
+    mleader_style: Option<String>,
+    /// The block a block reference is switched to (its Name row), checked to exist and not to
+    /// contain the block being edited.
+    block: Option<String>,
+    /// Each multileader style's landing distance, for Horizontal landing turned back on.
+    mleader_doglegs: Vec<(String, f64)>,
     dim_vars: DimVars,
     prep: Prepared,
     anno_scale: AnnoScale,
@@ -367,6 +374,20 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     let text_style = str_param(p, "style")
         .map(|n| d.text_style(n).map(|st| st.name.clone()).ok_or_else(|| bad("properties.set", format!("text style `{n}` not found"))))
         .transpose()?;
+    let mleader_style = str_param(p, "mleaderStyle")
+        .map(|n| {
+            d.mleader_styles
+                .iter()
+                .find(|m| m.name.eq_ignore_ascii_case(n.trim()))
+                .map(|m| m.name.clone())
+                .ok_or_else(|| bad("properties.set", format!("multileader style `{n}` not found")))
+        })
+        .transpose()?;
+    let block = match str_param(p, "name") {
+        Some(n) => Some(block_to_use(s, n)?),
+        None => None,
+    };
+    let d = s.doc()?;
     let dim_vars = DimVars::new(d, p)?;
     // A pattern must be one each hatch can take, as HATCHEDIT refuses others.
     if let Some(v) = str_param(p, "pattern").filter(|v| !v.trim().is_empty())
@@ -380,7 +401,8 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let prep = Prepared::new(d, p, &hs);
     let anno_scale = d.current_anno_scale();
-    let c = Call { p, color, transparency, thickness, lineweight, linetype, dim_style, text_style, dim_vars, prep, anno_scale };
+    let mleader_doglegs: Vec<(String, f64)> = d.mleader_styles.iter().map(|m| (m.name.clone(), m.dogleg)).collect();
+    let c = Call { p, color, transparency, thickness, lineweight, linetype, dim_style, text_style, mleader_style, block, mleader_doglegs, dim_vars, prep, anno_scale };
     // A failed call changes nothing (a command's error doesn't undo what it did), so the drawing
     // is taken for writing, and the layer made, only after every check.
     let d = s.doc_mut()?;
@@ -403,6 +425,7 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 EntityKind::MText(t) => mtext(t, &c, &mut used),
                 EntityKind::MLeader(m) => mleader(m, &c, &mut used),
+                EntityKind::Leader(l) => leader(l, &c, &mut used),
                 EntityKind::LwPolyline(pl) => {
                     if let Some(x) = c.num("width").filter(|x| *x >= 0.0) {
                         pl.const_width = x;
@@ -439,15 +462,120 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A multileader's text: its contents (#1081) and height.
 fn mleader<'c>(m: &mut cadcraft_doc::MLeader, c: &'c Call<'_>, used: &mut Used<'c>) {
-    let Some(t) = &mut m.text else { return };
-    if let Some(v) = str_param(c.p, "text") {
-        t.contents = v.replace('\n', "\\P");
-        used.insert("text");
+    if let Some(st) = &c.mleader_style {
+        m.style.clone_from(st);
+        used.insert("mleaderStyle");
     }
-    if let Some(x) = c.num("height").filter(|x| *x > 0.0) {
-        t.height = x;
-        used.insert("height");
+    // A multileader without leader lines has none to make straight or curved.
+    if let Some(kind) = leader_type(c)
+        && !m.leaders.is_empty()
+    {
+        m.spline = kind;
+        used.insert("leaderType");
     }
+    if let Some(x) = c.num("arrowheadSize").filter(|x| *x >= 0.0 && *x < 1e12) {
+        m.arrow_size = x;
+        used.insert("arrowheadSize");
+    }
+    if let Some(x) = c.num("landingDistance").filter(|x| *x >= 0.0 && *x < 1e12) {
+        m.dogleg = x;
+        used.insert("landingDistance");
+    }
+    // Horizontal landing off: no dogleg. On: the style's landing distance when there was none.
+    if let Some(on) = c.p.get("horizontalLanding").and_then(Value::as_bool) {
+        if !on {
+            m.dogleg = 0.0;
+        } else if m.dogleg <= 0.0 {
+            m.dogleg = c.mleader_doglegs.iter().find(|(n, _)| n.eq_ignore_ascii_case(&m.style)).map_or(0.36, |(_, d)| *d);
+        }
+        used.insert("horizontalLanding");
+    }
+    // Landing X / Y: the landing moves with its text and block content; the leader points stay.
+    let (x, y) = (c.num("landingX"), c.num("landingY"));
+    if x.is_some() || y.is_some() {
+        let at = m.landing.xy();
+        let d = Vec2::new(x.unwrap_or(at.x), y.unwrap_or(at.y)) - at;
+        m.landing.x += d.x;
+        m.landing.y += d.y;
+        if let Some(t) = &mut m.text {
+            t.insert.x += d.x;
+            t.insert.y += d.y;
+        }
+        if let Some(b) = &mut m.block {
+            let mut k = EntityKind::Insert(b.clone());
+            k.transform(&cadcraft_geom::Mat3::translate(d));
+            if let EntityKind::Insert(moved) = k {
+                *b = moved;
+            }
+        }
+        used.extend(x.map(|_| "landingX"));
+        used.extend(y.map(|_| "landingY"));
+    }
+    // The text: as an MTEXT's (contents, style, justification, height, rotation, spacing, width).
+    if let Some(t) = &mut m.text {
+        mtext(t, c, used);
+    }
+}
+
+/// A Leader type of Straight (`false`) or Spline (`true`).
+fn leader_type(c: &Call<'_>) -> Option<bool> {
+    match str_param(c.p, "leaderType")?.trim().to_ascii_lowercase().as_str() {
+        "straight" | "line" => Some(false),
+        "spline" | "curve" => Some(true),
+        _ => None,
+    }
+}
+
+/// A LEADER's dimension style, arrowhead, path type and vertices.
+fn leader<'c>(l: &mut cadcraft_doc::Leader, c: &'c Call<'_>, used: &mut Used<'c>) {
+    if let Some(st) = &c.dim_style {
+        l.style.clone_from(st);
+        used.insert("dimStyle");
+    }
+    if let Some(on) = c.p.get("arrow").and_then(Value::as_bool) {
+        l.arrow = on;
+        used.insert("arrow");
+    }
+    if let Some(kind) = leader_type(c) {
+        l.spline = kind;
+        used.insert("leaderType");
+    }
+    let (x, y) = (c.num("vertexX"), c.num("vertexY"));
+    if (x.is_some() || y.is_some())
+        && let Some(v) = vertex_index(c).and_then(|i| l.vertices.get_mut(i))
+    {
+        if let Some(x) = x {
+            v.x = x;
+            used.insert("vertexX");
+        }
+        if let Some(y) = y {
+            v.y = y;
+            used.insert("vertexY");
+        }
+        used.insert("vertex");
+    }
+}
+
+/// The palette's `vertex` (1 for the first) as an index.
+fn vertex_index(c: &Call<'_>) -> Option<usize> {
+    c.p.get("vertex").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).and_then(|n| n.checked_sub(1))
+}
+
+/// The block named `n` for a block reference's Name row: one the drawing defines, and not one
+/// that contains the block being edited in the block editor (it would contain itself).
+fn block_to_use(s: &Session, n: &str) -> Result<String> {
+    let d = s.doc()?;
+    let name = d.block(n.trim()).map(|b| b.name.clone()).ok_or_else(|| bad("properties.set", format!("block `{}` not found", n.trim())))?;
+    if name.starts_with('*') {
+        return Err(bad("properties.set", format!("`{name}` is not a block that can be inserted")));
+    }
+    if let Some(edited) = s.state()?.block_edit.as_ref().map(|b| b.name.clone()) {
+        let inner: Vec<Entity> = d.block(&name).map(|b| b.entities.iter().map(|e| (**e).clone()).collect()).unwrap_or_default();
+        if name.eq_ignore_ascii_case(&edited) || crate::cmd::blocks::references_block(d, &inner, &edited) {
+            return Err(bad("properties.set", format!("block `{name}` contains `{edited}`, which is being edited")));
+        }
+    }
+    Ok(name)
 }
 
 /// The properties every object has: annotative, layer, color, linetype, lineweight, linetype
@@ -721,10 +849,7 @@ fn polyline_vertex(pl: &mut cadcraft_doc::LwPolyline, c: &Call<'_>, used: &mut U
     if x.is_none() && y.is_none() {
         return;
     }
-    let Some(v) = c.p.get("vertex").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).and_then(|n| n.checked_sub(1)).and_then(|i| pl.vertices.get_mut(i))
-    else {
-        return;
-    };
+    let Some(v) = vertex_index(c).and_then(|i| pl.vertices.get_mut(i)) else { return };
     if let Some(x) = x {
         v.p.x = x;
         used.insert("vertexX");
@@ -765,6 +890,11 @@ fn ellipse(el: &mut cadcraft_doc::Ellipse, c: &Call<'_>, used: &mut Used<'_>) {
 }
 
 fn insert(i: &mut Insert, c: &Call<'_>, used: &mut Used<'_>) {
+    // Name: the reference shows another block; its attributes stay as they are.
+    if let Some(b) = &c.block {
+        i.block.clone_from(b);
+        used.insert("name");
+    }
     if let Some(x) = c.num("rotation") {
         let turn = x.to_radians() - i.rotation;
         i.rotation = x.to_radians();
