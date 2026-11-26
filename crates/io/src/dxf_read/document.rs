@@ -237,16 +237,19 @@ pub(super) fn setup_layouts(d: &mut Drawing, layout_objs: &mut [LayoutDef], rx: 
 /// The drawing's layer names (lower-cased), so adding the layer an entity names is a set lookup
 /// rather than a scan of the layer table per entity: many distinct names made that quadratic
 /// (CWE-407).
-struct LayerSet(std::collections::HashSet<String>);
+/// The flag: whether the table has per-viewport override records (`<name> @ <viewport>`), which
+/// lend a missing layer their properties ([`super::missing_layer`] scans the table for one).
+struct LayerSet(std::collections::HashSet<String>, bool);
 
 impl LayerSet {
     fn new(d: &Drawing) -> Self {
-        Self(d.layers.iter().map(|l| l.name.to_ascii_lowercase()).collect())
+        Self(d.layers.iter().map(|l| l.name.to_ascii_lowercase()).collect(), d.layers.iter().any(|l| l.name.contains(" @ ")))
     }
     /// [`Drawing::ensure_layer`] through the set.
     fn ensure(&mut self, d: &mut Drawing, name: &str) {
         if self.0.insert(name.to_ascii_lowercase()) {
-            d.layers.push(cadcraft_doc::Layer::new(name));
+            let layer = if self.1 { super::missing_layer(d, name) } else { cadcraft_doc::Layer::new(name) };
+            d.layers.push(layer);
         }
     }
 }

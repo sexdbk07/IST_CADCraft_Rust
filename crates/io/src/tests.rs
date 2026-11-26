@@ -4910,8 +4910,8 @@ fn attribute_field_length_survives_a_dxf_round_trip() {
 #[test]
 fn referenced_layer_missing_from_the_table_is_added() {
     let dxf = "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n2\n\
-               0\nLAYER\n2\n0\n70\n0\n62\n7\n6\nCONTINUOUS\n\
-               0\nLAYER\n2\nBASE @ 12\n70\n0\n62\n3\n6\nCONTINUOUS\n\
+               0\nLAYER\n5\n10\n100\nAcDbSymbolTableRecord\n100\nAcDbLayerTableRecord\n2\n0\n70\n0\n62\n7\n6\nCONTINUOUS\n\
+               0\nLAYER\n5\n11\n100\nAcDbSymbolTableRecord\n100\nAcDbLayerTableRecord\n2\nBASE @ 12\n70\n0\n62\n3\n6\nCONTINUOUS\n\
                0\nENDTAB\n0\nENDSEC\n\
                0\nSECTION\n2\nENTITIES\n\
                0\nLINE\n8\nGHOST\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n0\n\

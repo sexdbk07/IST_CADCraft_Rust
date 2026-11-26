@@ -326,15 +326,21 @@ fn add_referenced_layers(d: &mut Drawing) {
             missing.entry(name.to_uppercase()).or_insert_with(|| name.clone());
         }
     }
+    let overrides = d.layers.iter().any(|l| l.name.contains(" @ "));
     for name in missing.into_values() {
-        let overridden = |l: &&Layer| {
-            l.name.rsplit_once(" @ ").is_some_and(|(base, vp)| base.eq_ignore_ascii_case(&name) && !vp.is_empty() && vp.bytes().all(|b| b.is_ascii_digit()))
-        };
-        let layer = match d.layers.iter().find(overridden) {
-            Some(l) => Layer { name: name.clone(), ..l.clone() },
-            None => Layer::new(&name),
-        };
+        let layer = if overrides { missing_layer(d, &name) } else { Layer::new(&name) };
         d.layers.push(layer);
+    }
+}
+
+/// The layer added for `name`, which the table lacks: with the properties of its hidden
+/// per-viewport override record (`<name> @ <viewport>`) when the table has one, else the defaults.
+pub(crate) fn missing_layer(d: &Drawing, name: &str) -> Layer {
+    let overridden =
+        |l: &&Layer| l.name.rsplit_once(" @ ").is_some_and(|(base, vp)| base.eq_ignore_ascii_case(name) && !vp.is_empty() && vp.bytes().all(|b| b.is_ascii_digit()));
+    match d.layers.iter().find(overridden) {
+        Some(l) => Layer { name: name.to_string(), ..l.clone() },
+        None => Layer::new(name),
     }
 }
 
