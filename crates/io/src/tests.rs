@@ -4884,3 +4884,20 @@ fn attribute_vertical_justification_comes_from_group_74() {
     assert_eq!(valign("MID"), Some(VAlign::Baseline));
     assert_eq!(valign("CEN"), Some(VAlign::Middle));
 }
+
+// The field length (group 73 of an attribute) is read and written back, so a save keeps it.
+#[test]
+fn attribute_field_length_survives_a_dxf_round_trip() {
+    let dxf = "0\nSECTION\n2\nENTITIES\n0\nINSERT\n8\n0\n66\n1\n2\nB\n10\n0\n20\n0\n30\n0\n\
+               0\nATTRIB\n8\n0\n100\nAcDbText\n10\n0\n20\n0\n30\n0\n40\n2.5\n1\nv\n100\nAcDbAttribute\n2\nLEN\n70\n0\n73\n7\n\
+               0\nSEQEND\n0\nENDSEC\n0\nEOF\n";
+    let field_length = |d: &Drawing| {
+        let ins = first(d, |k| if let EntityKind::Insert(i) = k { Some(i.clone()) } else { None });
+        ins.attribs.iter().find(|a| a.tag == "LEN").map(|a| a.modes.field_length)
+    };
+    let mut d = read_dxf(dxf.as_bytes()).unwrap();
+    assert_eq!(field_length(&d), Some(7));
+    d.blocks.entry("B".into()).or_insert_with(|| std::sync::Arc::new(Block::new("B")));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert_eq!(field_length(&back), Some(7));
+}

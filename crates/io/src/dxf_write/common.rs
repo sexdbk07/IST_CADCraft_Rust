@@ -373,6 +373,9 @@ pub(super) fn text_tags(
             }
             w.s(2, &a.tag);
             w.i(70, attrib_flags(a));
+            if a.modes.field_length != 0 {
+                w.i(73, i64::from(a.modes.field_length));
+            }
             if v != 0 {
                 w.i(74, v);
             }

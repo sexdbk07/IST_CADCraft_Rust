@@ -21,7 +21,10 @@ pub(super) fn attrib_modes(own: &[Tag]) -> AttribModes {
     let sub = own.iter().position(|t| t.code == 100 && t.str().trim().starts_with("AcDbAttribute")).unwrap_or(0);
     let rest = own.get(sub..).unwrap_or_default();
     let lock_position = rest.iter().position(|t| t.code == 2).is_some_and(|at| rest.iter().skip(at + 1).any(|t| t.code == 280 && t.i64() != 0));
-    AttribModes { verify: flags & 4 != 0, preset: flags & 8 != 0, lock_position }
+    // Group 73 of the attribute subclass is the field length (the text's vertical justification
+    // is its 74 there).
+    let field_length = rest.iter().find(|t| t.code == 73).map(Tag::i64).and_then(|v| i16::try_from(v).ok()).unwrap_or(0);
+    AttribModes { verify: flags & 4 != 0, preset: flags & 8 != 0, lock_position, field_length }
 }
 
 /// An ATTRIB's or ATTDEF's groups split at its embedded multiline text (`101 Embedded Object`):

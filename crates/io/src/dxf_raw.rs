@@ -226,6 +226,35 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
     out
 }
 
+/// Paper space block records, and their blocks, keyed by the layout they hold rather than by
+/// name: a file's `*PAPER_SPACE644` is written back as `*Paper_Space3` (names follow the layouts'
+/// order), so what was kept for it (its extension dictionary, xdata) would find no record. Gives
+/// (key by name, key by layout) for each; reading files the foreign data under the second, and
+/// writing gives the second the handle of the record written for the first.
+fn paper_aliases(tables: &Recs, objects: &Recs) -> Vec<(ForeignKey, ForeignKey)> {
+    let layouts: HashMap<String, String> = objects
+        .iter()
+        .filter(|(k, _, _)| k == "LAYOUT")
+        .filter_map(|(_, _, t)| {
+            let at = t.iter().position(|x| x.code == 100 && x.str().trim() == "AcDbLayout")?;
+            Some((head(t).handle?, up(&val(t.get(at..)?, 1)?)))
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (kind, _, t) in tables {
+        let name = up(&val(t, 2).unwrap_or_default());
+        if kind != "BLOCK_RECORD" || !name.starts_with("*PAPER_SPACE") {
+            continue;
+        }
+        let Some(layout) = val(t, 340).map(|h| norm(&h)).and_then(|h| layouts.get(&h)) else { continue };
+        let alias = format!("\u{0}LAYOUT\u{0}{layout}");
+        for k in ["BLOCK_RECORD", "BLOCK", "ENDBLK"] {
+            out.push(((k.to_string(), name.clone()), (k.to_string(), alias.clone())));
+        }
+    }
+    out
+}
+
 /// Other applications' xdata of a record of type `kind`: whole applications, each with valid
 /// groups (codes 1000 and up, balanced `1002` braces), up to [`MAX_XDATA_GROUPS`].
 fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
@@ -333,7 +362,15 @@ pub(crate) fn read(secs: &[SectionRef<'_>], d: &mut Drawing) {
     let (classes, tables, blocks, entities, objects) = (get("CLASSES"), get("TABLES"), get("BLOCKS"), get("ENTITIES"), get("OBJECTS"));
     // The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
     let ents = entity_types(d);
-    let ids = identities(&tables, &blocks, &objects);
+    let mut ids = identities(&tables, &blocks, &objects);
+    let aliases: HashMap<ForeignKey, ForeignKey> = paper_aliases(&tables, &objects).into_iter().collect();
+    if !aliases.is_empty() {
+        for k in ids.values_mut() {
+            if let Some(a) = aliases.get(k) {
+                k.clone_from(a);
+            }
+        }
+    }
     // Extension dictionaries of entities and records: owner → dictionary.
     let xdict_of = extension_dictionaries(&tables, &blocks, &entities);
     // Objects by handle: the first of each, and none that has an entity's handle.
@@ -1089,16 +1126,15 @@ impl Map<'_> {
     }
 }
 
-/// The extras of a written record, if the drawing keeps any for it.
-fn extra_for<'a>(f: &'a Foreign, xd: &XdataOf, rec: &Rec, body: &[Tag], block: &str) -> Option<Cow<'a, ForeignExtra>> {
+/// The extras of a written record, if the drawing keeps any for it. A paper space record is
+/// found by its layout too (`alias`, see [`paper_aliases`]).
+fn extra_for<'a>(f: &'a Foreign, xd: &XdataOf, alias: &HashMap<ForeignKey, ForeignKey>, rec: &Rec, body: &[Tag], block: &str) -> Option<Cow<'a, ForeignExtra>> {
+    let record = |key: ForeignKey| f.records.get(&key).or_else(|| alias.get(&key).and_then(|a| f.records.get(a))).map(Cow::Borrowed);
     match (rec.sec.as_str(), rec.kind.as_str()) {
-        ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".to_string(), block.to_string())).map(Cow::Borrowed),
+        ("BLOCKS", "BLOCK") => record(("BLOCK".to_string(), block.to_string())),
         ("BLOCKS", "ENDBLK") => None,
         ("ENTITIES" | "BLOCKS", _) => entity_extra(f, xd, handle(&head(body).handle?)?),
-        ("TABLES", kind) => {
-            let name = up(&val(body, 2).unwrap_or_default());
-            f.records.get(&(kind.to_string(), name)).map(Cow::Borrowed)
-        }
+        ("TABLES", kind) => record((kind.to_string(), up(&val(body, 2).unwrap_or_default()))),
         _ => None,
     }
 }
@@ -1190,6 +1226,13 @@ pub(crate) fn finish(
     for (h, k) in identities(&tables, &blocks, &objects) {
         roles.entry(k).or_insert(h);
     }
+    // Paper space records written under new names, by their layouts (see [`paper_aliases`]).
+    let alias: HashMap<ForeignKey, ForeignKey> = paper_aliases(&tables, &objects).into_iter().collect();
+    for (name, layout) in &alias {
+        if let Some(h) = roles.get(name).cloned() {
+            roles.entry(layout.clone()).or_insert(h);
+        }
+    }
     let mut written: HashSet<String> = recs.iter().filter_map(|r| head(body(r)).handle).collect();
     // The written CLASSES as numbered (500 for the first): the writer's own, then the kept ones it
     // doesn't write (appended below, in this order). A kept proxy's group 91 is renumbered to its
@@ -1228,7 +1271,7 @@ pub(crate) fn finish(
     let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, s, _)| *s);
     let root_keys: HashSet<String> =
         objects.iter().find(|(_, s, _)| Some(*s) == root).map(|(_, _, t)| entries(t).into_iter().map(|(k, _)| up(&k)).collect()).unwrap_or_default();
-    let (mut attached, merged) = kept_dictionaries(f, &xd, &recs, tags);
+    let (mut attached, merged) = kept_dictionaries(f, &xd, &alias, &recs, tags);
     for (_, t) in planned.values().flatten() {
         let x = head(t.get(1..).unwrap_or(&[])).handle.and_then(|h| handle(&h)).and_then(|h| entity_extra(f, &xd, h));
         attached.extend(x.and_then(|x| x.xdict).map(Handle::hex));
@@ -1400,7 +1443,7 @@ pub(crate) fn finish(
             record(&map, &ur, ub, x.as_deref(), Some(extra), false, &mut out);
         }
         out.extend(tags.get(r.start).cloned());
-        let x = extra_for(f, &xd, r, b, &block);
+        let x = extra_for(f, &xd, &alias, r, b, &block);
         let joined = joined_into(&merged_into, b);
         if x.is_none() && Some(r.start) != root && joined.is_none() {
             out.extend(b.iter().map(|tag| {
@@ -1427,7 +1470,7 @@ pub(crate) fn finish(
 /// Kept extension dictionaries of written records: those that go on a record without its own,
 /// and those whose entries join the one the writer gave a table (the LAYER table's, holding the
 /// layer states) as kept dictionary → the written one.
-fn kept_dictionaries(f: &Foreign, xd: &XdataOf, recs: &[Rec], tags: &[Tag]) -> (HashSet<String>, HashMap<String, String>) {
+fn kept_dictionaries(f: &Foreign, xd: &XdataOf, alias: &HashMap<ForeignKey, ForeignKey>, recs: &[Rec], tags: &[Tag]) -> (HashSet<String>, HashMap<String, String>) {
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
     let mut block = String::new();
     let mut attached: HashSet<String> = HashSet::new();
@@ -1436,7 +1479,7 @@ fn kept_dictionaries(f: &Foreign, xd: &XdataOf, recs: &[Rec], tags: &[Tag]) -> (
         if r.kind == "BLOCK" {
             block = up(&val(body(r), 2).unwrap_or_default());
         }
-        let Some(kept) = extra_for(f, xd, r, body(r), &block).and_then(|x| x.xdict) else { continue };
+        let Some(kept) = extra_for(f, xd, alias, r, body(r), &block).and_then(|x| x.xdict) else { continue };
         match head(body(r)).xdict {
             None => {
                 attached.insert(kept.hex());

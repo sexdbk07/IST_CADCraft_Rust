@@ -39,6 +39,10 @@ pub struct AttribModes {
     /// 280 after the flags). A reference's attributes take it from their definitions.
     #[serde(default)]
     pub lock_position: bool,
+    /// The field length (DXF group 73 of the attribute subclass). AutoCAD doesn't use it, but
+    /// files carry it, so it is kept for a faithful save.
+    #[serde(default)]
+    pub field_length: i16,
 }
 
 impl AttribModes {
