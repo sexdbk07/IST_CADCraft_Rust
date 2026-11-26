@@ -290,6 +290,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, curve_points: usize)
     if d.layer("0").is_none() {
         d.layers.insert(0, Layer::default());
     }
+    add_referenced_layers(&mut d);
     crate::dxf_raw::read(&secs, &mut d);
     crate::dxf_clip::read(&mut d);
     if rx.curves.cut > 0 {
@@ -306,6 +307,35 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, curve_points: usize)
     d.reserved_handles.clear();
     remember_text_fits(&mut d);
     Ok(d)
+}
+
+/// Most layers [`add_referenced_layers`] adds to one drawing.
+const MAX_ADDED_LAYERS: usize = 10_000;
+
+/// Layers objects are on that the LAYER table lacks, added as AutoCAD adds them when it reads
+/// such a file. Left out, a DWG save put those objects on layer 0 (inside a block, that shows them
+/// in the reference's colour). When the table has the hidden per-viewport override record of the
+/// missing layer (`<name> @ <viewport>`, as AutoCAD names them), the layer takes its properties.
+fn add_referenced_layers(d: &mut Drawing) {
+    let known: std::collections::HashSet<String> = d.layers.iter().map(|l| l.name.to_uppercase()).collect();
+    let mut missing: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let stores = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
+    for e in stores.flat_map(|s| s.iter()) {
+        let name = &e.common.layer;
+        if !name.is_empty() && !known.contains(&name.to_uppercase()) && missing.len() < MAX_ADDED_LAYERS {
+            missing.entry(name.to_uppercase()).or_insert_with(|| name.clone());
+        }
+    }
+    for name in missing.into_values() {
+        let overridden = |l: &&Layer| {
+            l.name.rsplit_once(" @ ").is_some_and(|(base, vp)| base.eq_ignore_ascii_case(&name) && !vp.is_empty() && vp.bytes().all(|b| b.is_ascii_digit()))
+        };
+        let layer = match d.layers.iter().find(overridden) {
+            Some(l) => Layer { name: name.clone(), ..l.clone() },
+            None => Layer::new(&name),
+        };
+        d.layers.push(layer);
+    }
 }
 
 /// Viewport ids another program left unknown (ZWCAD writes 69 = -1, read as 0). A layout whose

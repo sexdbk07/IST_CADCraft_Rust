@@ -4901,3 +4901,23 @@ fn attribute_field_length_survives_a_dxf_round_trip() {
     let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
     assert_eq!(field_length(&back), Some(7));
 }
+
+// An object on a layer the LAYER table lacks gets that layer when read (as AutoCAD adds it), so a
+// DWG save doesn't move it to layer 0. A hidden per-viewport override record (`<name> @ <vp>`)
+// lends the missing layer its properties.
+#[test]
+fn referenced_layer_missing_from_the_table_is_added() {
+    let dxf = "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n2\n\
+               0\nLAYER\n2\n0\n70\n0\n62\n7\n6\nCONTINUOUS\n\
+               0\nLAYER\n2\nBASE @ 12\n70\n0\n62\n3\n6\nCONTINUOUS\n\
+               0\nENDTAB\n0\nENDSEC\n\
+               0\nSECTION\n2\nENTITIES\n\
+               0\nLINE\n8\nGHOST\n10\n0\n20\n0\n30\n0\n11\n1\n21\n1\n31\n0\n\
+               0\nLINE\n8\nBASE\n10\n0\n20\n0\n30\n0\n11\n2\n21\n2\n31\n0\n\
+               0\nENDSEC\n0\nEOF\n";
+    let d = read_dxf(dxf.as_bytes()).unwrap();
+    assert_eq!(d.layer("GHOST").map(|l| l.color), Some(Color::Index(7)));
+    assert_eq!(d.layer("BASE").map(|l| l.color), Some(Color::Index(3)));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert!(back.layer("GHOST").is_some() && back.layer("BASE").is_some());
+}
