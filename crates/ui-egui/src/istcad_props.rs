@@ -138,7 +138,10 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
             selection_box(app, ui, &types, sel.len());
             ui.add_space(5.0);
             for section in &sections {
-                section_ui(app, ui, section, &handles);
+                // A group with nothing to show for this selection is left out, as in iStCAD.
+                if !section.rows.is_empty() {
+                    section_ui(app, ui, section, &handles);
+                }
             }
             ui.add_space(12.0);
         });
@@ -445,10 +448,6 @@ fn section_ui(app: &mut CadApp, ui: &mut egui::Ui, s: &Section, handles: &[Handl
         return;
     }
     ui.add_space(4.0);
-    if s.rows.is_empty() {
-        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
-        ui.painter().text(pos2(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, "—", FontId::proportional(13.0), LABEL_INK);
-    }
     for (i, row) in s.rows.iter().enumerate() {
         row_ui(app, ui, row, &format!("{}:{i}:{}", s.title, row.label), handles);
     }

@@ -834,7 +834,12 @@ fn combo(ui: &mut egui::Ui, picker: &Picker, t: Tokens) -> Option<Picked> {
         x += 20.0;
     }
     let text = shown.map(|c| c.label.clone()).or_else(|| picker.current.clone()).unwrap_or_default();
-    p.text(pos2(x, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(12.5), Color32::WHITE);
+    // The text stops short of the arrow, cut with "…" when it doesn't fit.
+    let room = (rect.right() - 22.0 - x).max(0.0);
+    let mut job = egui::text::LayoutJob::simple_singleline(text, FontId::proportional(12.5), Color32::WHITE);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    p.galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, Color32::WHITE);
     let tri = pos2(rect.right() - 12.0, rect.center().y);
     ui.painter().add(egui::Shape::convex_polygon(
         vec![tri + vec2(-3.5, -2.0), tri + vec2(3.5, -2.0), tri + vec2(0.0, 2.5)],
