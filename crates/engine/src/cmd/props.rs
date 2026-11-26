@@ -24,7 +24,8 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("properties", "Properties", run_get).menu(&["Modify", "Properties"]).alias(&["pr", "props", "ch"]).params("{handles?} → properties of the selection").noundo(),
         CommandSpec::new("properties.set", "Set Properties", run_set).params(
             "{handles?, layer?, color?, linetype?, lineweight?, ltscale?, thickness?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, annotative?, \
-             <geometry fields: radius, center, start, end, text, height, rotation…>, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
+             <geometry fields: radius, center, start, end, text, height, rotation…>, line: startX/Y?, endX/Y?, length?, angle?, \
+             circle and arc: centerX/Y?, polyline: width?, closed?, plinegen?, block reference and point: positionX/Y?, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
              mtext: style?, justify?, lineSpacing?, lineSpacingDistance?, lineSpacingStyle?: atLeast | exactly, positionX/Y/Z?, \
              dimension: dimStyle?, textOverride?, textRotation?, textPositionX/Y?, prefix?, suffix?, altPrefix?, altSuffix?, dimScale?, precision?, \
              <dimension style variables (field or DIM* name, e.g. textHeight / DIMTXT) set as overrides of each dimension>, clearOverrides?, clear?: [variable]} \
@@ -42,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(
                 "{handles?, type?: one of the `types` names, to describe only those objects} → {types: [{type, count}], filter?, count, \
                  groups: [{name, rows: [{key, label, kind, value, varies, display, editable, note?, overridden?, options?: [{value, label}], quick?}]}]} \
-                 (each row's `key` is the `properties.set` key that changes it; text, mtext and dimensions have their own groups)",
+                 (each row's `key` is the `properties.set` key that changes it; text, mtext, dimensions, lines, circles, arcs, polylines, points, ellipses, block references and hatches have their own groups)",
             )
             .noundo(),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)

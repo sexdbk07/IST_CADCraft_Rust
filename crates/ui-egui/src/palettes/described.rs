@@ -51,7 +51,9 @@ pub(super) struct Edit {
 /// the description has none, so the palette draws its own rows for the object.
 pub(super) fn groups(ui: &mut egui::Ui, d: &Drawing, desc: &Description, ids: &[String], edit: &mut Option<Edit>, bad: &mut Option<String>) -> bool {
     let typed: Vec<_> = desc.groups.iter().filter(|g| g.name != "General").collect();
-    if typed.is_empty() {
+    // Text, mtext and dimensions (each has a Text group); for the shapes the engine also
+    // describes, this palette keeps its own rows (vertex and attribute editing).
+    if !typed.iter().any(|g| g.name == "Text") {
         return false;
     }
     let angles = AngleSettings::from_header(&d.header);

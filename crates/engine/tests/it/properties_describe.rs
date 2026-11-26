@@ -1,5 +1,6 @@
 //! `properties.describe`: the Properties palette's rows for text, mtext and dimensions, with
-//! shared values, *VARIES*, units, and the reason a dimension's text height can't be edited.
+//! shared values, *VARIES*, units, the reason a dimension's text height can't be edited, and
+//! the Geometry rows of lines, circles, polylines and block references.
 
 use cadcraft_engine::Session;
 use serde_json::{Value, json};
@@ -225,4 +226,75 @@ fn float_noise_does_not_vary_but_a_real_difference_does() {
     s.execute("properties.set", &json!({ "handles": [b.clone()], "height": 7.000001 })).unwrap();
     let both = describe(&mut s, json!({ "handles": [a, b] }));
     assert_eq!(row(&both, "Text", "height")["varies"], true);
+}
+
+/// The row `key` in group `group`, as a number.
+fn num(desc: &Value, group: &str, key: &str) -> f64 {
+    row(desc, group, key)["value"].as_f64().unwrap_or_else(|| panic!("{key} is not a number: {desc}"))
+}
+
+#[test]
+fn lines_have_geometry_rows_that_edit_every_line_one_axis_at_a_time() {
+    let mut s = Session::new();
+    s.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
+    let a = last(&s);
+    s.execute("line", &json!({ "points": [[0, 5], [10, 8]] })).unwrap();
+    let b = last(&s);
+    let both = describe(&mut s, json!({ "handles": [a, b] }));
+    assert_eq!(group_names(&both), ["General", "Geometry"]);
+    assert_eq!(row(&both, "Geometry", "startX")["varies"], false);
+    assert_eq!(row(&both, "Geometry", "startY")["varies"], true);
+    assert!(num(&describe(&mut s, json!({ "handles": [b] })), "Geometry", "length") > 10.0);
+    // Start X moves both starts across and keeps each one's Y.
+    s.execute("properties.set", &json!({ "handles": [a, b], "startX": -4 })).unwrap();
+    let after = describe(&mut s, json!({ "handles": [b] }));
+    assert_eq!((num(&after, "Geometry", "startX"), num(&after, "Geometry", "startY")), (-4.0, 5.0));
+    let after = describe(&mut s, json!({ "handles": [a] }));
+    assert_eq!(num(&after, "Geometry", "startY"), 0.0);
+}
+
+#[test]
+fn shapes_of_one_type_have_their_own_rows() {
+    let mut s = Session::new();
+    s.execute("circle", &json!({ "center": [3, 4], "radius": 2 })).unwrap();
+    let c = last(&s);
+    let circle = describe(&mut s, json!({ "handles": [c] }));
+    assert!(num(&circle, "Geometry", "area") > num(&circle, "Geometry", "radius"));
+    s.execute("properties.set", &json!({ "handles": [c], "centerY": 9 })).unwrap();
+    let moved = describe(&mut s, json!({ "handles": [c] }));
+    assert_eq!((num(&moved, "Geometry", "centerX"), num(&moved, "Geometry", "centerY")), (3.0, 9.0));
+
+    s.execute("pline", &json!({ "vertices": [[0, 0], [4, 0], [4, 3]], "closed": false })).unwrap();
+    let pl = last(&s);
+    let open = describe(&mut s, json!({ "handles": [pl] }));
+    assert_eq!(row(&open, "Misc", "closed")["value"], false);
+    s.execute("properties.set", &json!({ "handles": [pl], "closed": true })).unwrap();
+    let closed = describe(&mut s, json!({ "handles": [pl] }));
+    assert!(num(&closed, "Geometry", "length") > num(&open, "Geometry", "length"));
+}
+
+#[test]
+fn a_block_reference_moves_with_its_attributes() {
+    let mut s = Session::new();
+    s.execute("attdef", &json!({ "tag": "T", "default": "one", "at": [0, 1] })).unwrap();
+    s.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
+    let hs: Vec<String> = s.doc().unwrap().model.iter().map(|e| e.handle.hex()).collect();
+    s.execute("block", &json!({ "name": "B", "base": [0, 0], "handles": hs, "keep": "delete" })).unwrap();
+    s.execute("insert", &json!({ "name": "B", "at": [100, 0] })).unwrap();
+    let i = last(&s);
+    let attrib_x = |s: &Session| {
+        let d = s.doc().unwrap();
+        match &d.model.last().unwrap().kind {
+            cadcraft_engine::doc::EntityKind::Insert(ins) => ins.attribs.first().map(|a| a.text.insert.x),
+            _ => None,
+        }
+    };
+    let before = attrib_x(&s);
+    assert_eq!(row(&describe(&mut s, json!({ "handles": [i] })), "Misc", "name")["value"], "B");
+    s.execute("properties.set", &json!({ "handles": [i], "positionX": 130 })).unwrap();
+    let after = describe(&mut s, json!({ "handles": [i] }));
+    assert_eq!(num(&after, "Geometry", "positionX"), 130.0);
+    if let (Some(b), Some(a)) = (before, attrib_x(&s)) {
+        assert!((a - b - 30.0).abs() < 1e-9, "the attribute moved with the reference");
+    }
 }

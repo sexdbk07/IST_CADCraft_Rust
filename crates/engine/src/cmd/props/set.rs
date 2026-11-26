@@ -16,6 +16,35 @@ use crate::cmd::{bad, point_value, str_param, targets};
 use crate::properties::{LINE_PITCH, is_dim_linetype, join_post, split_post};
 use crate::{Result, Session};
 
+/// Set `p`'s x (or y) to `v` when given, noting `key` as used.
+fn set_axis(p: &mut Vec3, v: Option<f64>, x: bool, key: &'static str, used: &mut Used<'_>) {
+    let Some(v) = v else { return };
+    if x {
+        p.x = v;
+    } else {
+        p.y = v;
+    }
+    used.insert(key);
+}
+
+/// A block reference's or point's Position X / Position Y: the object moves there, attributes
+/// and all, as MOVE moves it.
+fn move_to(k: &mut EntityKind, c: &Call<'_>, used: &mut Used<'_>) {
+    let at = match k {
+        EntityKind::Insert(i) => i.insert.xy(),
+        EntityKind::Point(pt) => pt.p.xy(),
+        _ => return,
+    };
+    let (x, y) = (c.num("positionX"), c.num("positionY"));
+    if x.is_none() && y.is_none() {
+        return;
+    }
+    let to = Vec2::new(x.unwrap_or(at.x), y.unwrap_or(at.y));
+    k.transform(&cadcraft_geom::Mat3::translate(to - at));
+    used.extend(x.map(|_| "positionX"));
+    used.extend(y.map(|_| "positionY"));
+}
+
 fn set_xy(p: &mut Vec3, v: &Value) {
     if let Some(q) = point_value(v) {
         p.x = q.x;
@@ -348,6 +377,7 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
         let h = *h;
         d.modify_entity(h, |e| {
             common(e, &c, &mut used);
+            move_to(&mut e.kind, &c, &mut used);
             match &mut e.kind {
                 EntityKind::Line(l) => line(l, &c, &mut used),
                 EntityKind::Circle(ci) => circle(ci, &c, &mut used),
@@ -366,6 +396,10 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     if let Some(closed) = p.get("closed").and_then(Value::as_bool) {
                         pl.closed = closed;
                         used.insert("closed");
+                    }
+                    if let Some(on) = p.get("plinegen").and_then(Value::as_bool) {
+                        pl.plinegen = on;
+                        used.insert("plinegen");
                     }
                 }
                 EntityKind::Insert(i) => insert(i, &c, &mut used),
@@ -452,6 +486,11 @@ fn line(l: &mut Line, c: &Call<'_>, used: &mut Used<'_>) {
         set_xy(&mut l.b, v);
         used.insert("end");
     }
+    // One coordinate at a time, the other kept (the palette's Start X … End Y rows).
+    set_axis(&mut l.a, c.num("startX"), true, "startX", used);
+    set_axis(&mut l.a, c.num("startY"), false, "startY", used);
+    set_axis(&mut l.b, c.num("endX"), true, "endX", used);
+    set_axis(&mut l.b, c.num("endY"), false, "endY", used);
     // Length / angle keep the start point and move the end point.
     let (a, b) = (l.a.xy(), l.b.xy());
     let length = c.num("length").filter(|x| *x > 0.0 && *x < 1e15);
@@ -477,6 +516,8 @@ fn circle(ci: &mut Circle, c: &Call<'_>, used: &mut Used<'_>) {
         set_xy(&mut ci.center, v);
         used.insert("center");
     }
+    set_axis(&mut ci.center, c.num("centerX"), true, "centerX", used);
+    set_axis(&mut ci.center, c.num("centerY"), false, "centerY", used);
     if let Some(r) = c.num("radius").filter(|r| *r > 0.0) {
         ci.radius = r;
         used.insert("radius");
@@ -500,6 +541,8 @@ fn arc(a: &mut Arc, c: &Call<'_>, used: &mut Used<'_>) {
         set_xy(&mut a.center, v);
         used.insert("center");
     }
+    set_axis(&mut a.center, c.num("centerX"), true, "centerX", used);
+    set_axis(&mut a.center, c.num("centerY"), false, "centerY", used);
     if let Some(r) = c.num("radius").filter(|r| *r > 0.0) {
         a.radius = r;
         used.insert("radius");

@@ -3,20 +3,22 @@
 //!
 //! Layout (iStCAD 1.0.233 `MainWindow.xaml`): `#313741`, padding 6, its left edge dragged to
 //! resize; the "PROPERTIES" title; the selection box ("No selection", the object type or "N
-//! objects selected", ⌄ to limit the rows to one type); then the groups General, Geometry,
-//! Text, View (closed) and Misc, each under a 24-point `#262B33` header bar with ◀ / ▼. Rows: the
-//! label (`#BEC4CD`) in 1 part and the value (`#E1E3E8`, right-aligned) in 1.15 parts.
+//! objects selected", ⌄ to limit the rows to one type); then General, the groups the engine
+//! describes for the selected type (Geometry, Text, Pattern, a dimension's Lines & Arrows …
+//! Tolerances), View (closed) and Misc, each under a 24-point `#262B33` header bar with ◀ / ▼.
+//! Rows: the label (`#BEC4CD`) in 1 part and the value (`#E1E3E8`, right-aligned) in 1.15 parts.
 //!
-//! General follows iStCAD's order: Count, Type, Layer, Color, (one object) Handle, Linetype and
-//! Lineweight; one object's geometry is under Geometry. The values come from the engine's
-//! `properties.describe` and are changed through `properties.set` (geometry through the same
-//! keys CADCraft's palette uses), so the palette edits what iStCAD's only showed: click a value
-//! to type a new one (Enter applies, Esc cancels) or to pick from its list.
+//! Editing works as in AutoCAD's palette: click a value to type a new one (Enter or leaving the
+//! field applies, Esc cancels) or to pick from its list; a Yes/No value flips. Every selected
+//! object of the described type changes, and values they don't share read "Multiple". The rows
+//! come from `properties.describe` and edits go through `properties.set`, so agents can do the
+//! same. With nothing selected, General holds the settings new objects get (layer, color,
+//! linetype, lineweight, linetype scale, thickness), changed through their commands.
 
 use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 
-use cadcraft_engine::doc::{Drawing, Entity, EntityKind, Handle};
+use cadcraft_engine::doc::{Drawing, Entity, Handle};
 use cadcraft_engine::properties::{self, Kind, Row as DescRow};
 
 use crate::CadApp;
@@ -34,28 +36,19 @@ const VALUE_INK: Color32 = Color32::from_rgb(225, 227, 232);
 const HEADER_INK: Color32 = Color32::from_rgb(0xe4, 0xe9, 0xea);
 const BOX_FILL: Color32 = Color32::from_rgb(0x4a, 0x51, 0x5b);
 
-/// What applying a typed number changes.
-#[derive(Clone, Debug, PartialEq)]
-enum Target {
-    /// A `properties.set` key taking the number.
-    Key(&'static str),
-    /// The x of a point key; `y` is kept.
-    X(&'static str, f64),
-    /// The y of a point key; `x` is kept.
-    Y(&'static str, f64),
-}
-
 /// How a row's value can be changed.
 #[derive(Clone, Debug, PartialEq)]
 enum Edit {
     ReadOnly,
-    Number(Target),
+    /// A `properties.set` key taking a typed number.
+    Number(&'static str),
     Text(&'static str),
     /// Pick from `(value sent, label shown)`.
     Choice(&'static str, Vec<(Value, String)>),
     Toggle(&'static str, bool),
-    /// The current layer (no selection): LAYER.CURRENT.
-    CurrentLayer(Vec<String>),
+    /// No selection: a setting for new objects (current layer, color, linetype…), set by running
+    /// `cmd` with `base` and `{param: value}`; picked from `choices`, or typed when there are none.
+    Current { cmd: &'static str, base: Value, param: &'static str, choices: Vec<(Value, String)> },
 }
 
 /// One palette row.
@@ -211,21 +204,18 @@ fn selection_box(app: &mut CadApp, ui: &mut egui::Ui, types: &[(String, usize)],
 
 // ---------------------------------------------------------------- rows
 
-/// The palette's sections for `handles`: General, the engine's own groups for text, mtext and
-/// dimensions under Text, then View and Misc.
+/// The palette's sections for `handles`, in iStCAD's order: General, the engine's groups for
+/// the selected type (Geometry, Text, Pattern, a dimension's Lines & Arrows … Tolerances), View
+/// (closed) and Misc. With nothing selected, General holds the settings new objects get.
 fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::View>) -> Vec<Section> {
     let units = Units::of(doc);
     let desc = (!handles.is_empty()).then(|| properties::describe(doc, handles, None));
     let general_rows = desc.as_ref().and_then(|d| d.groups.iter().find(|g| g.name == "General")).map(|g| g.rows.clone()).unwrap_or_default();
     let row = |key: &str| general_rows.iter().find(|r| r.key == key);
     let mut general = Vec::new();
-    let mut geometry = Vec::new();
     let mut misc = Vec::new();
     if handles.is_empty() {
-        // iStCAD shows Type and Layer with nothing selected; the layer here is the current one.
-        general.push(PropRow::read("Type", "—"));
-        let layers: Vec<String> = doc.layers.iter().map(|l| l.name.clone()).collect();
-        general.push(PropRow::new("Layer", doc.header.str("CLAYER", "0"), Edit::CurrentLayer(layers)));
+        general = current_rows(doc, &units);
     } else {
         let ents: Vec<&Entity> = handles.iter().filter_map(|h| doc.entity(*h).map(|e| &**e)).collect();
         let types = type_counts(doc, handles);
@@ -239,18 +229,17 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
         }
         if let [e] = ents.as_slice() {
             general.push(PropRow::read("Handle", e.handle.hex()));
-            geometry.extend(geometry_rows(e, &units));
         }
         if let Some(r) = row("linetype") {
             general.push(from_desc("Linetype", r, linetype_choices(doc)));
         }
         if let Some(r) = row("lineweight") {
-            general.push(from_desc("Lineweight", r, Vec::new()));
+            general.push(from_desc("Lineweight", r, lineweight_choices()));
         }
         let thickness = shared(ents.iter().map(|e| e.common.thickness));
         misc.push(match thickness {
-            Some(v) => PropRow::new("Thickness", units.distance(v), Edit::Number(Target::Key("thickness"))),
-            None => PropRow::new("Thickness", "Multiple", Edit::Number(Target::Key("thickness"))),
+            Some(v) => PropRow::new("Thickness", units.distance(v), Edit::Number("thickness")),
+            None => PropRow::new("Thickness", "Multiple", Edit::Number("thickness")),
         });
         for (key, label) in [("ltscale", "Linetype scale"), ("transparency", "Transparency")] {
             if let Some(r) = row(key) {
@@ -258,13 +247,16 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
             }
         }
     }
-    // iStCAD 1.0.233's groups: General, Geometry, Text, View (closed) and Misc.
     let mut out = vec![Section { title: "General", open_by_default: true, rows: general }];
-    out.push(Section { title: "Geometry", open_by_default: true, rows: geometry });
-    // Text, MText and Dimension rows, as the engine describes them, under Text.
-    let text: Vec<PropRow> =
-        desc.iter().flat_map(|d| d.groups.iter()).filter(|g| g.name != "General").flat_map(|g| g.rows.iter().map(|r| from_desc(r.label, r, r_choices(r)))).collect();
-    out.push(Section { title: "Text", open_by_default: true, rows: text });
+    // The engine's own groups for the selection, by name; its Misc rows join the palette's Misc.
+    for g in desc.iter().flat_map(|d| d.groups.iter()).filter(|g| g.name != "General") {
+        let rows = g.rows.iter().map(|r| from_desc(r.label, r, r_choices(r)));
+        if g.name == "Misc" {
+            misc.splice(0..0, rows);
+        } else {
+            out.push(Section { title: g.name, open_by_default: true, rows: rows.collect() });
+        }
+    }
     let view_rows = view
         .map(|v| {
             vec![
@@ -277,6 +269,26 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
     out.push(Section { title: "View", open_by_default: false, rows: view_rows });
     out.push(Section { title: "Misc", open_by_default: true, rows: misc });
     out
+}
+
+/// With nothing selected, AutoCAD's General rows are the settings new objects get (CLAYER,
+/// CECOLOR, CELTYPE, CELWEIGHT, CELTSCALE, THICKNESS), each changed by its command. (New objects
+/// don't take a current transparency yet, so it isn't offered.)
+fn current_rows(doc: &Drawing, units: &Units) -> Vec<PropRow> {
+    let h = &doc.header;
+    let current = |cmd: &'static str, base: Value, param: &'static str, choices: Vec<(Value, String)>| Edit::Current { cmd, base, param, choices };
+    let color = cadcraft_engine::doc::color::Color::from_aci(i16::try_from(h.i64("CECOLOR", 256)).unwrap_or(256)).name();
+    let lineweight = cadcraft_engine::doc::Lineweight::from_dxf(i16::try_from(h.i64("CELWEIGHT", -1)).unwrap_or(-1)).name();
+    let layers: Vec<(Value, String)> = doc.layers.iter().map(|l| (json!(l.name), l.name.clone())).collect();
+    vec![
+        PropRow::read("Type", "No selection"),
+        PropRow::new("Layer", h.str("CLAYER", "0"), current("layer.current", json!({}), "name", layers)),
+        PropRow::new("Color", color, current("color", json!({}), "color", color_choices())),
+        PropRow::new("Linetype", h.str("CELTYPE", "ByLayer"), current("linetype", json!({}), "current", linetype_choices(doc))),
+        PropRow::new("Lineweight", lineweight, current("lweight", json!({}), "lineweight", lineweight_choices())),
+        PropRow::new("Linetype scale", format!("{:.4}", h.f64("CELTSCALE", 1.0)), current("setvar", json!({ "name": "CELTSCALE" }), "value", Vec::new())),
+        PropRow::new("Thickness", units.distance(h.f64("THICKNESS", 0.0)), current("thickness", json!({}), "thickness", Vec::new())),
+    ]
 }
 
 /// The value every item has, or `None` when they differ (or there are none).
@@ -296,7 +308,7 @@ fn from_desc(label: &str, r: &DescRow, choices: Vec<(Value, String)>) -> PropRow
     } else {
         match r.kind {
             Kind::Bool => Edit::Toggle(r.key, r.value.as_bool().unwrap_or(false)),
-            Kind::Number | Kind::Distance | Kind::Angle | Kind::Direction => Edit::Number(Target::Key(r.key)),
+            Kind::Number | Kind::Distance | Kind::Angle | Kind::Direction => Edit::Number(r.key),
             _ => Edit::Text(r.key),
         }
     };
@@ -323,6 +335,17 @@ fn linetype_choices(doc: &Drawing) -> Vec<(Value, String)> {
     out
 }
 
+/// ByLayer, ByBlock, Default and the standard lineweights, as LWEIGHT and `properties.set` take them.
+fn lineweight_choices() -> Vec<(Value, String)> {
+    use cadcraft_engine::doc::Lineweight;
+    let mut out: Vec<(Value, String)> = ["ByLayer", "ByBlock", "Default"].iter().map(|n| (json!(n), n.to_string())).collect();
+    out.extend(Lineweight::STANDARD.iter().map(|w| {
+        let name = Lineweight::Mm100(*w).name();
+        (json!(f64::from(*w) / 100.0), name)
+    }));
+    out
+}
+
 fn color_choices() -> Vec<(Value, String)> {
     let mut out = vec![(json!("ByLayer"), "ByLayer".to_string()), (json!("ByBlock"), "ByBlock".to_string())];
     for (aci, name) in [(1, "Red"), (2, "Yellow"), (3, "Green"), (4, "Cyan"), (5, "Blue"), (6, "Magenta"), (7, "White")] {
@@ -331,8 +354,7 @@ fn color_choices() -> Vec<(Value, String)> {
     out
 }
 
-/// Lengths and angles as the drawing shows them (LUNITS/LUPREC; angles in degrees, 3 places as
-/// iStCAD prints them).
+/// Lengths as the drawing shows them (LUNITS/LUPREC).
 struct Units {
     lunits: i64,
     luprec: i64,
@@ -345,80 +367,6 @@ impl Units {
     fn distance(&self, v: f64) -> String {
         cadcraft_engine::units::format_distance(v, self.lunits, self.luprec)
     }
-    fn degrees(&self, radians: f64) -> String {
-        format!("{}°", trim(radians.to_degrees()))
-    }
-}
-
-/// A number with up to three decimals and no trailing zeros ("0.###").
-fn trim(v: f64) -> String {
-    let s = format!("{v:.3}");
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s == "-0" { "0".into() } else { s.to_string() }
-}
-
-/// iStCAD's geometry rows for one object, editable where `properties.set` takes the value.
-fn geometry_rows(e: &Entity, u: &Units) -> Vec<PropRow> {
-    let num = |label: &str, v: f64, target: Target| PropRow::new(label, u.distance(v), Edit::Number(target));
-    match &e.kind {
-        EntityKind::Line(l) => {
-            let (a, b) = (l.a, l.b);
-            let (dx, dy) = (b.x - a.x, b.y - a.y);
-            vec![
-                num("Start X", a.x, Target::X("start", a.y)),
-                num("Start Y", a.y, Target::Y("start", a.x)),
-                num("End X", b.x, Target::X("end", b.y)),
-                num("End Y", b.y, Target::Y("end", b.x)),
-                num("Length", dx.hypot(dy), Target::Key("length")),
-                PropRow::new("Angle", u.degrees(dy.atan2(dx)), Edit::Number(Target::Key("angle"))),
-            ]
-        }
-        EntityKind::Circle(c) => vec![
-            num("Center X", c.center.x, Target::X("center", c.center.y)),
-            num("Center Y", c.center.y, Target::Y("center", c.center.x)),
-            num("Radius", c.radius, Target::Key("radius")),
-            num("Diameter", c.radius.abs() * 2.0, Target::Key("diameter")),
-        ],
-        EntityKind::Arc(a) => vec![
-            PropRow::read("Center X", u.distance(a.center.x)),
-            PropRow::read("Center Y", u.distance(a.center.y)),
-            num("Radius", a.radius, Target::Key("radius")),
-            PropRow::new("Start angle", u.degrees(a.start), Edit::Number(Target::Key("startAngle"))),
-            PropRow::new("End angle", u.degrees(a.end), Edit::Number(Target::Key("endAngle"))),
-        ],
-        EntityKind::LwPolyline(pl) => {
-            let pts: Vec<(f64, f64, f64)> = pl.vertices.iter().map(|v| (v.p.x, v.p.y, v.bulge)).collect();
-            vec![
-                PropRow::read("Closed", if pl.closed { "Yes" } else { "No" }),
-                PropRow::read("Vertices", pts.len().to_string()),
-                PropRow::read("Length", u.distance(polyline_length(&pts, pl.closed))),
-            ]
-        }
-        _ => Vec::new(),
-    }
-}
-
-/// Length of a lightweight polyline: chords, or arcs where a vertex has a bulge.
-fn polyline_length(pts: &[(f64, f64, f64)], closed: bool) -> f64 {
-    let n = pts.len();
-    if n < 2 {
-        return 0.0;
-    }
-    let segments = if closed { n } else { n - 1 };
-    (0..segments)
-        .map(|i| {
-            let (x0, y0, bulge) = pts[i];
-            let (x1, y1, _) = pts[(i + 1) % n];
-            let chord = (x1 - x0).hypot(y1 - y0);
-            if bulge.abs() < 1e-12 {
-                return chord;
-            }
-            // Included angle θ = 4·atan(bulge); arc length = chord · θ / (2·sin(θ/2)).
-            let theta = 4.0 * bulge.atan();
-            let half = (theta / 2.0).sin();
-            if half.abs() < 1e-12 { chord } else { (chord * theta / (2.0 * half)).abs() }
-        })
-        .sum()
 }
 
 // ---------------------------------------------------------------- drawing
@@ -482,37 +430,13 @@ fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, hand
     }
     match &row.edit {
         Edit::Choice(key, options) => {
-            let mut picked = None;
-            egui::Popup::menu(&resp).show(|ui| {
-                ui.set_min_width(value_rect.width().max(160.0));
-                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                    for (value, label) in options {
-                        if ui.add(egui::Button::selectable(*label == row.value, label.as_str())).clicked() {
-                            picked = Some(value.clone());
-                            ui.close();
-                        }
-                    }
-                });
-            });
-            if let Some(v) = picked {
+            if let Some(v) = pick(&resp, value_rect, row, options) {
                 apply(app, handles, json!({ *key: v }));
             }
         }
-        Edit::CurrentLayer(layers) => {
-            let mut picked = None;
-            egui::Popup::menu(&resp).show(|ui| {
-                ui.set_min_width(value_rect.width().max(160.0));
-                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                    for name in layers {
-                        if ui.add(egui::Button::selectable(*name == row.value, name.as_str())).clicked() {
-                            picked = Some(name.clone());
-                            ui.close();
-                        }
-                    }
-                });
-            });
-            if let Some(name) = picked {
-                let _ = app.run("layer.current", json!({ "name": name }));
+        Edit::Current { cmd, base, param, choices } if !choices.is_empty() => {
+            if let Some(v) = pick(&resp, value_rect, row, choices) {
+                run_current(app, cmd, base, param, v);
             }
         }
         Edit::Toggle(key, on) => {
@@ -520,7 +444,7 @@ fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, hand
                 apply(app, handles, json!({ *key: !*on }));
             }
         }
-        Edit::Number(_) | Edit::Text(_) => {
+        Edit::Number(_) | Edit::Text(_) | Edit::Current { .. } => {
             if resp.clicked() {
                 let start = if row.value == "Multiple" { String::new() } else { row.value.trim_end_matches('°').to_string() };
                 app.istcad.props.editing = Some((row_id.to_string(), start));
@@ -528,6 +452,35 @@ fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, hand
             }
         }
         Edit::ReadOnly => {}
+    }
+}
+
+/// A row's drop-down list, as AutoCAD's palette opens one for a choice: the value picked.
+fn pick(resp: &egui::Response, value_rect: Rect, row: &PropRow, options: &[(Value, String)]) -> Option<Value> {
+    let mut picked = None;
+    egui::Popup::menu(resp).show(|ui| {
+        ui.set_min_width(value_rect.width().max(160.0));
+        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+            for (value, label) in options {
+                if ui.add(egui::Button::selectable(label.eq_ignore_ascii_case(&row.value), label.as_str())).clicked() {
+                    picked = Some(value.clone());
+                    ui.close();
+                }
+            }
+        });
+    });
+    picked
+}
+
+/// Change a setting for new objects: `cmd` with `base` and `{param: value}`; a refusal shows
+/// in the status slot.
+fn run_current(app: &mut CadApp, cmd: &str, base: &Value, param: &str, value: Value) {
+    let mut params = base.clone();
+    if let Some(o) = params.as_object_mut() {
+        o.insert(param.to_string(), value);
+    }
+    if let Err(e) = app.run(cmd, params) {
+        app.set_status(e);
     }
 }
 
@@ -568,20 +521,28 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
     }
     let params = match &row.edit {
         Edit::Text(key) => json!({ *key: typed }),
-        Edit::Number(target) => {
-            let Ok(v) = typed.replace(',', ".").parse::<f64>() else {
+        Edit::Number(key) => {
+            let Some(v) = number(&typed) else {
                 app.set_status(format!("{}: \"{typed}\" is not a number", row.label));
                 return;
             };
-            match target {
-                Target::Key(key) => json!({ *key: v }),
-                Target::X(key, y) => json!({ *key: [v, y] }),
-                Target::Y(key, x) => json!({ *key: [x, v] }),
-            }
+            json!({ *key: v })
+        }
+        Edit::Current { cmd, base, param, .. } => {
+            // A number where one was typed (Linetype scale, Thickness, Transparency %), else the text.
+            let v = number(&typed).map_or_else(|| json!(typed), |n| json!(n));
+            let (cmd, base, param) = (*cmd, base.clone(), *param);
+            run_current(app, cmd, &base, param, v);
+            return;
         }
         _ => return,
     };
     apply(app, handles, params);
+}
+
+/// A typed number, with a decimal comma taken as a point.
+fn number(typed: &str) -> Option<f64> {
+    typed.replace(',', ".").parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 /// Run `properties.set` on `handles` with `params`, reporting a refusal in the status slot.
@@ -603,23 +564,6 @@ fn apply(app: &mut CadApp, handles: &[Handle], mut params: Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn istcad_polyline_length_follows_bulges() {
-        let square = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)];
-        assert!((polyline_length(&square, true) - 4.0).abs() < 1e-9);
-        assert!((polyline_length(&square, false) - 3.0).abs() < 1e-9);
-        // A bulge of 1 makes a half circle over the chord: longer than the chord.
-        let half = [(0.0, 0.0, 1.0), (2.0, 0.0, 0.0)];
-        assert!((polyline_length(&half, false) - std::f64::consts::PI).abs() < 1e-9);
-    }
-
-    #[test]
-    fn istcad_numbers_read_like_istcad() {
-        assert_eq!(trim(45.0), "45");
-        assert_eq!(trim(12.34567), "12.346");
-        assert_eq!(trim(-0.0001), "0");
-    }
 
     #[test]
     fn istcad_summary_names_the_selection() {

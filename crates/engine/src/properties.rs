@@ -3,8 +3,8 @@
 //! value reads in the drawing's units, and whether it can be edited. `properties.describe`
 //! returns the same description, so the palette, Quick Properties and agents read one list.
 //!
-//! Text, MText and Dimension have their own groups; other objects have the General group only
-//! (the palette draws their rows itself). Dimension rows are the dimension style variables,
+//! Text, MText and Dimension have their own groups; lines, circles, arcs, polylines, points,
+//! ellipses, block references and hatches have AutoCAD's Geometry (and Pattern or Misc) rows. Dimension rows are the dimension style variables,
 //! valued as the dimension draws them (its style with its overrides); setting one stores a
 //! per-dimension override, as AutoCAD's Properties palette does (DIMOVERRIDE).
 
@@ -182,6 +182,8 @@ pub fn describe(d: &Drawing, handles: &[Handle], filter: Option<&str>) -> Descri
             groups.extend(mtext_groups(&c, &ents, &mtexts));
         } else if dims.len() == ents.len() {
             groups.extend(dimension_groups(&c, &ents, &dims));
+        } else {
+            groups.extend(shape_groups(&c, &ents));
         }
     }
     Description { types, filter, count: ents.len(), groups }
@@ -803,4 +805,137 @@ fn fixed_height(c: &Ctx, r: &mut Row, styles: &[DimStyle]) {
         r.editable = fixed.iter().any(Option::is_none);
         r.note = Some("Some of these dimensions take their text height from a fixed-height text style.".into());
     }
+}
+
+/// Every described object's `T`, when they are all of that type.
+fn all_of<'a, T>(ents: &[&'a Entity], f: impl Fn(&'a EntityKind) -> Option<&'a T>) -> Option<Vec<&'a T>> {
+    ents.iter().map(|e| f(&e.kind)).collect()
+}
+
+/// The Geometry (and Pattern or Misc) rows of objects of one drawn type, as AutoCAD's palette
+/// shows them; values the objects don't share read *VARIES*, and an edit sets every object.
+fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
+    let n = |v: f64| json!(v);
+    let geometry = |rows: Vec<Row>| Group { name: "Geometry", rows };
+    if let Some(ls) = all_of(ents, |k| if let EntityKind::Line(l) = k { Some(l) } else { None }) {
+        let delta = |l: &cadcraft_doc::Line| l.b.xy() - l.a.xy();
+        return vec![geometry(vec![
+            c.row("startX", "Start X", Kind::Distance, ls.iter().map(|l| n(l.a.x))),
+            c.row("startY", "Start Y", Kind::Distance, ls.iter().map(|l| n(l.a.y))),
+            c.row("startZ", "Start Z", Kind::Distance, ls.iter().map(|l| n(l.a.z))).read_only(),
+            c.row("endX", "End X", Kind::Distance, ls.iter().map(|l| n(l.b.x))),
+            c.row("endY", "End Y", Kind::Distance, ls.iter().map(|l| n(l.b.y))),
+            c.row("endZ", "End Z", Kind::Distance, ls.iter().map(|l| n(l.b.z))).read_only(),
+            c.row("deltaX", "Delta X", Kind::Distance, ls.iter().map(|l| n(delta(l).x))).read_only(),
+            c.row("deltaY", "Delta Y", Kind::Distance, ls.iter().map(|l| n(delta(l).y))).read_only(),
+            c.row("length", "Length", Kind::Distance, ls.iter().map(|l| n(delta(l).len()))).quick(),
+            c.row("angle", "Angle", Kind::Angle, ls.iter().map(|l| n(cadcraft_geom::norm_angle(delta(l).y.atan2(delta(l).x)).to_degrees()))),
+        ])];
+    }
+    if let Some(cs) = all_of(ents, |k| if let EntityKind::Circle(x) = k { Some(x) } else { None }) {
+        return vec![geometry(vec![
+            c.row("centerX", "Center X", Kind::Distance, cs.iter().map(|x| n(x.center.x))),
+            c.row("centerY", "Center Y", Kind::Distance, cs.iter().map(|x| n(x.center.y))),
+            c.row("centerZ", "Center Z", Kind::Distance, cs.iter().map(|x| n(x.center.z))).read_only(),
+            c.row("radius", "Radius", Kind::Distance, cs.iter().map(|x| n(x.radius))).quick(),
+            c.row("diameter", "Diameter", Kind::Distance, cs.iter().map(|x| n(x.radius * 2.0))),
+            c.row("circumference", "Circumference", Kind::Distance, cs.iter().map(|x| n(x.radius * cadcraft_geom::TAU))),
+            c.row("area", "Area", Kind::Number, cs.iter().map(|x| n(x.radius * x.radius * cadcraft_geom::PI))),
+        ])];
+    }
+    if let Some(arcs) = all_of(ents, |k| if let EntityKind::Arc(x) = k { Some(x) } else { None }) {
+        let sweep = |a: &cadcraft_doc::Arc| cadcraft_geom::ccw_sweep(a.start, a.end);
+        return vec![geometry(vec![
+            c.row("centerX", "Center X", Kind::Distance, arcs.iter().map(|a| n(a.center.x))),
+            c.row("centerY", "Center Y", Kind::Distance, arcs.iter().map(|a| n(a.center.y))),
+            c.row("centerZ", "Center Z", Kind::Distance, arcs.iter().map(|a| n(a.center.z))).read_only(),
+            c.row("radius", "Radius", Kind::Distance, arcs.iter().map(|a| n(a.radius))).quick(),
+            c.row("startAngle", "Start angle", Kind::Angle, arcs.iter().map(|a| n(a.start.to_degrees()))),
+            c.row("endAngle", "End angle", Kind::Angle, arcs.iter().map(|a| n(a.end.to_degrees()))),
+            c.row("totalAngle", "Total angle", Kind::Angle, arcs.iter().map(|a| n(sweep(a).to_degrees()))).read_only(),
+            c.row("arcLength", "Arc length", Kind::Distance, arcs.iter().map(|a| n(a.radius * sweep(a)))).read_only(),
+        ])];
+    }
+    if let Some(pls) = all_of(ents, |k| if let EntityKind::LwPolyline(x) = k { Some(x) } else { None }) {
+        let geom = |pl: &cadcraft_doc::LwPolyline, closed: bool| cadcraft_geom::Polyline { vertices: pl.vertices.clone(), closed };
+        let geometry_rows = vec![
+            c.row("vertices", "Vertices", Kind::Number, pls.iter().map(|pl| json!(pl.vertices.len()))).read_only(),
+            c.row("width", "Global width", Kind::Distance, pls.iter().map(|pl| n(pl.const_width))),
+            c.row("elevation", "Elevation", Kind::Distance, pls.iter().map(|pl| n(pl.elevation))).read_only(),
+            // AutoCAD measures an open polyline's area as if it were closed.
+            c.row("area", "Area", Kind::Number, pls.iter().map(|pl| n(geom(pl, true).area().abs()))).read_only(),
+            c.row("length", "Length", Kind::Distance, pls.iter().map(|pl| n(geom(pl, pl.closed).len()))).read_only(),
+        ];
+        let misc = vec![
+            c.row("closed", "Closed", Kind::Bool, pls.iter().map(|pl| json!(pl.closed))),
+            c.row("plinegen", "Linetype generation", Kind::Bool, pls.iter().map(|pl| json!(pl.plinegen))),
+        ];
+        return vec![geometry(geometry_rows), Group { name: "Misc", rows: misc }];
+    }
+    if let Some(pts) = all_of(ents, |k| if let EntityKind::Point(x) = k { Some(x) } else { None }) {
+        return vec![geometry(vec![
+            c.row("positionX", "Position X", Kind::Distance, pts.iter().map(|p| n(p.p.x))),
+            c.row("positionY", "Position Y", Kind::Distance, pts.iter().map(|p| n(p.p.y))),
+            c.row("positionZ", "Position Z", Kind::Distance, pts.iter().map(|p| n(p.p.z))).read_only(),
+        ])];
+    }
+    if let Some(els) = all_of(ents, |k| if let EntityKind::Ellipse(x) = k { Some(x) } else { None }) {
+        let note = "Change an ellipse with grips, SCALE or ROTATE.";
+        let ro = |r: Row| Row { note: Some(note.into()), ..r.read_only() };
+        return vec![geometry(vec![
+            ro(c.row("centerX", "Center X", Kind::Distance, els.iter().map(|e| n(e.center.x)))),
+            ro(c.row("centerY", "Center Y", Kind::Distance, els.iter().map(|e| n(e.center.y)))),
+            ro(c.row("majorRadius", "Major radius", Kind::Distance, els.iter().map(|e| n(e.major.xy().len())))),
+            ro(c.row("minorRadius", "Minor radius", Kind::Distance, els.iter().map(|e| n(e.major.xy().len() * e.ratio)))),
+            ro(c.row("ratio", "Radius ratio", Kind::Number, els.iter().map(|e| n(e.ratio)))),
+        ])];
+    }
+    if let Some(ins) = all_of(ents, |k| if let EntityKind::Insert(x) = k { Some(x) } else { None }) {
+        let note = "Scale X, Y and Z change together: use the Scale row, or SCALE.";
+        let axis = |r: Row| Row { note: Some(note.into()), ..r.read_only() };
+        // One scale for references scaled alike on every axis.
+        let uniform = |i: &cadcraft_doc::Insert| {
+            let s = i.scale;
+            if (s.x - s.y).abs() < 1e-12 && (s.x - s.z).abs() < 1e-12 { n(s.x) } else { json!(VARIES) }
+        };
+        let mut scale = c.row("scale", "Scale", Kind::Number, ins.iter().copied().map(uniform));
+        if scale.value == json!(VARIES) {
+            (scale.value, scale.varies, scale.display) = (Value::Null, true, VARIES.to_string());
+        }
+        return vec![
+            geometry(vec![
+                c.row("positionX", "Position X", Kind::Distance, ins.iter().map(|i| n(i.insert.x))),
+                c.row("positionY", "Position Y", Kind::Distance, ins.iter().map(|i| n(i.insert.y))),
+                c.row("positionZ", "Position Z", Kind::Distance, ins.iter().map(|i| n(i.insert.z))).read_only(),
+                axis(c.row("scaleX", "Scale X", Kind::Number, ins.iter().map(|i| n(i.scale.x)))),
+                axis(c.row("scaleY", "Scale Y", Kind::Number, ins.iter().map(|i| n(i.scale.y)))),
+                axis(c.row("scaleZ", "Scale Z", Kind::Number, ins.iter().map(|i| n(i.scale.z)))),
+                scale,
+            ]),
+            Group {
+                name: "Misc",
+                rows: vec![
+                    c.row("name", "Name", Kind::Text, ins.iter().map(|i| json!(i.block))).read_only().quick(),
+                    c.row("rotation", "Rotation", Kind::Direction, ins.iter().map(|i| n(i.rotation.to_degrees()))).quick(),
+                ],
+            },
+        ];
+    }
+    if let Some(hs) = all_of(ents, |k| if let EntityKind::Hatch(x) = k { Some(x) } else { None }) {
+        let patterns = std::iter::once("SOLID")
+            .chain(cadcraft_doc::library::standard_patterns().iter().map(|p| p.name).filter(|n| !n.eq_ignore_ascii_case("SOLID")))
+            .map(|name| Choice::new(json!(name), name))
+            .collect();
+        let name = |h: &cadcraft_doc::Hatch| if h.solid { "SOLID".to_string() } else { h.pattern.to_ascii_uppercase() };
+        return vec![Group {
+            name: "Pattern",
+            rows: vec![
+                c.choice("pattern", "Pattern name", Kind::Choice, patterns, hs.iter().map(|h| json!(name(h)))).quick(),
+                c.row("angle", "Angle", Kind::Angle, hs.iter().map(|h| n(h.angle.to_degrees()))),
+                c.row("scale", "Scale", Kind::Number, hs.iter().map(|h| n(h.scale))),
+                c.row("associative", "Associative", Kind::Bool, hs.iter().map(|h| json!(h.associative))).read_only(),
+            ],
+        }];
+    }
+    Vec::new()
 }
