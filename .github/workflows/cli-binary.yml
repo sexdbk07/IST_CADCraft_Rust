@@ -39,13 +39,16 @@ jobs:
           cargo update -p acadrust --precise "$v"
           grep -A3 'name = "acadrust"' Cargo.lock
       - name: cargo build --release -p cadcraft-cli
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: ${{ startsWith(github.ref_name, 'exp/profile') && 'line-tables-only' || '0' }}
+          CARGO_PROFILE_RELEASE_STRIP: ${{ startsWith(github.ref_name, 'exp/profile') && 'none' || 'debuginfo' }}
         run: |
           if [[ "$GITHUB_REF_NAME" == exp/acadrust-* ]]; then cargo build --release -p cadcraft-cli; else cargo build --locked --release -p cadcraft-cli; fi
       - name: Publish on ci-bin
         run: |
           set -e
           mkdir -p /tmp/bin && cp target/release/cadcraft-cli /tmp/bin/
-          strip /tmp/bin/cadcraft-cli || true
+          if [[ "$GITHUB_REF_NAME" != exp/profile* ]]; then strip /tmp/bin/cadcraft-cli || true; fi
           cp Cargo.lock /tmp/bin/Cargo.lock
           cd /tmp/bin
           echo "${GITHUB_SHA}" > SOURCE_COMMIT
