@@ -63,9 +63,13 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
     for label in ["Text Style", "Dim Style", "Layer", "Command:", "Model"] {
         assert!(shown.iter().any(|t| t.contains(label)), "the iStCAD window doesn't show {label:?}: {shown:?}");
     }
-    // CADCraft's menus are in the title bar, once: no second menu row. No viewport label.
-    for menu in ["Insert", "Draw", "Dimension", "Modify", "Window", "Help"] {
+    // CADCraft's menus are in the title bar, folded into seven: no second menu row, and the
+    // folded menus (Window, Dimension, Insert, Format) are submenus, not buttons. No viewport label.
+    for menu in ["File", "Edit", "View", "Draw", "Modify", "Tools", "Help"] {
         assert_eq!(shown.iter().filter(|t| t.as_str() == menu).count(), 1, "{menu} in {shown:?}");
+    }
+    for folded in ["Window", "Dimension", "Insert", "Format"] {
+        assert!(!shown.iter().any(|t| t == folded), "{folded} is a button");
     }
     assert!(!shown.iter().any(|t| t.contains("2D Wireframe")), "the iStCAD window shows a viewport label");
     save(&mut h, "01-start");

@@ -840,10 +840,42 @@ pub fn menu_bar(app: &mut CadApp, ui: &mut egui::Ui) {
     }
 }
 
-/// The menu bar's menus drawn by `title` as buttons in a row of another bar (the iStCAD title
-/// bar): the same tree, menus and switching on hover as [`menu_bar`].
+/// The menu bar's eleven menus folded into seven for a compact row: each group's first menu as
+/// it is, the others as submenus of it (View ▸ Window, Draw ▸ Dimension / Insert,
+/// Tools ▸ Format).
+const COMPACT_MENUS: [(&str, &[&str]); 7] = [
+    ("File", &[]),
+    ("Edit", &[]),
+    ("View", &["Window"]),
+    ("Draw", &["Dimension", "Insert"]),
+    ("Modify", &[]),
+    ("Tools", &["Format"]),
+    ("Help", &[]),
+];
+
+/// [`tree`] folded by [`COMPACT_MENUS`]. A menu no group names stays a menu of its own.
+fn compact_tree(app: &CadApp) -> Vec<(String, Vec<Entry>)> {
+    let mut menus = tree(app);
+    let mut take = |name: &str| menus.iter().position(|(m, _)| m == name).map(|i| menus.remove(i).1);
+    let mut out = Vec::new();
+    for (top, extras) in COMPACT_MENUS {
+        let Some(mut entries) = take(top) else { continue };
+        for extra in extras {
+            if let Some(children) = take(extra).filter(|c| !c.is_empty()) {
+                entries.push(Entry::Sub { label: (*extra).to_string(), children });
+            }
+        }
+        out.push((top.to_string(), entries));
+    }
+    out.append(&mut menus);
+    out
+}
+
+/// The menu bar's menus, folded into seven ([`COMPACT_MENUS`]), drawn by `title` as buttons in
+/// a row of another bar (the iStCAD title bar): the same menus, submenus, shortcuts and switching
+/// on hover as [`menu_bar`].
 pub(crate) fn menu_row(app: &mut CadApp, ui: &mut egui::Ui, mut title: impl FnMut(&mut egui::Ui, &str) -> egui::Response) {
-    let tree = tree(app);
+    let tree = compact_tree(app);
     let mut clicked = None;
     let titles: Vec<egui::Response> = tree.iter().map(|(name, _)| title(ui, crate::i18n::menu(name))).collect();
     switch_on_hover(ui.ctx(), &titles);

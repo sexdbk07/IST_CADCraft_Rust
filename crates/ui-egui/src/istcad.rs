@@ -390,8 +390,8 @@ fn title_left_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     }
     ui.add_space(5.0);
     rule(ui, 22.0, 0.0);
-    // CADCraft's menus (File, Edit, View, Insert, Format, Tools, Draw, Dimension, Modify,
-    // Window, Help) sit here, where iStCAD has its File / Edit / View, so there is no second row.
+    // CADCraft's menus sit here, where iStCAD has its File / Edit / View, folded into seven
+    // (File, Edit, View, Draw, Modify, Tools, Help), so there is no second row.
     crate::menus::menu_row(app, ui, |ui, name| {
         let w = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(13.0), Color32::WHITE).size().x;
         text_button(ui, vec2((w + 16.0).max(36.0), 28.0), name, 13.0, &format!("{name} menu"))
