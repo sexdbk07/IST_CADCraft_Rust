@@ -90,12 +90,16 @@ fn write_tables(w: &mut W, plan: TableWritePlan<'_>) -> HashMap<String, String> 
         w.f(41, s.width_factor);
         w.f(50, s.oblique.to_degrees());
         w.i(71, if s.backwards { 2 } else { 0 } | if s.upside_down { 4 } else { 0 });
-        w.f(42, 0.2);
+        // The height last used, as read (AutoCAD's TEXT offers it), else 0.2.
+        w.f(42, if s.last_height.is_finite() && s.last_height > 0.0 { s.last_height } else { 0.2 });
         // The built-in font goes out as `txt`, which every reader has, and a Linux font as its
         // Windows one with portable fonts; CADCraft's own name travels in `CADCRAFT` xdata
         // (`1000 FONT`, name) so the style reopens with it.
         let file = if s.font == cadcraft_fonts_name() { "txt" } else { cadcraft_fonts::windows::written_font(&s.font, d.portable_fonts) };
-        w.s(3, file);
+        // A Windows font the file named by its family alone goes back the same way: the family
+        // travels in the kept `ACAD` xdata, and as a file name it would be looked for as SHX.
+        let family_only = !s.family_only.is_empty() && s.family_only == s.font && file == s.font;
+        w.s(3, if family_only { "" } else { file });
         w.s(4, &s.big_font);
         if s.annotative {
             annotative_xdata(w);

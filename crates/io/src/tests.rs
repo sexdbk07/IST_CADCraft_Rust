@@ -1999,6 +1999,8 @@ fn text_style_flags_roundtrip() {
         upside_down: true,
         vertical: true,
         annotative: true,
+        last_height: 3.5,
+        family_only: String::new(),
     };
     d.text_styles.push(st.clone());
     d.text_styles.push(TextStyle { name: "Plain".into(), font: "arial.ttf".into(), backwards: true, ..TextStyle::default() });
@@ -4920,4 +4922,25 @@ fn referenced_layer_missing_from_the_table_is_added() {
     assert_eq!(d.layer("BASE").map(|l| l.color), Some(Color::Index(3)));
     let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
     assert!(back.layer("GHOST").is_some() && back.layer("BASE").is_some());
+}
+
+// A Windows (VNI, TCVN3) font named by its family alone (empty font file, family in ACAD xdata)
+// is written back the same way, not as a font file AutoCAD would look for as a missing SHX; the
+// height last used (group 42) is kept.
+#[test]
+fn style_family_only_font_stays_family_only() {
+    let dxf = "0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nSTYLE\n70\n1\n\
+               0\nSTYLE\n2\nVN\n70\n0\n40\n0\n41\n0.8\n50\n0\n71\n0\n42\n250\n3\n\n4\n\n\
+               1001\nACAD\n1000\nVNI-Helve-Condense\n1071\n2\n\
+               0\nENDTAB\n0\nENDSEC\n0\nEOF\n";
+    let d = read_dxf(dxf.as_bytes()).unwrap();
+    let st = d.text_style("VN").unwrap();
+    assert_eq!(st.font, "VNI-Helve-Condense");
+    let out = write_dxf(&d);
+    let lines: Vec<&str> = out.lines().map(str::trim).collect();
+    let at = lines.windows(2).position(|w| w == ["2", "VN"]).unwrap();
+    let rec: Vec<&str> = lines[at..].iter().take_while(|l| **l != "ENDTAB").copied().collect();
+    let group = |code: &str| rec.chunks(2).find(|p| p[0] == code).map(|p| p.get(1).copied().unwrap_or_default());
+    assert_eq!(group("3"), Some(""), "{rec:?}");
+    assert_eq!(group("42").and_then(|v| v.parse::<f64>().ok()), Some(250.0));
 }

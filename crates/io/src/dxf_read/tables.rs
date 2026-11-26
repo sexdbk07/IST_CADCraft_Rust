@@ -176,9 +176,14 @@ pub(super) fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                 }
                 // 70 bit 4: vertical; 71 bits 2/4: backwards / upside down.
                 let gen_flags = t.i(71).unwrap_or(0);
+                let file = t.s(3).unwrap_or_default();
+                let font = style_font(tg, file.clone());
+                let family_only = if file.trim().is_empty() { font.clone() } else { String::new() };
                 let st = TextStyle {
                     name: name.clone(),
-                    font: style_font(tg, t.s(3).unwrap_or_default()),
+                    font,
+                    family_only,
+                    last_height: t.fd(42, 0.0),
                     big_font: t.s(4).unwrap_or_default(),
                     height: t.fd(40, 0.0),
                     width_factor: t.fd(41, 1.0),

@@ -122,6 +122,14 @@ pub struct TextStyle {
     pub upside_down: bool,
     pub vertical: bool,
     pub annotative: bool,
+    /// The height last used with the style (DXF group 42), which AutoCAD offers as the TEXT
+    /// height; 0 when unknown. Kept for a faithful save.
+    pub last_height: f64,
+    /// The TrueType family a file named this style's font by alone (no font file, the family in
+    /// the `ACAD` xdata), as AutoCAD writes Windows fonts such as VNI-Helve. While `font` is
+    /// still that family, the style is written the same way: a font file named after the family
+    /// would be looked for as a missing SHX font.
+    pub family_only: String,
 }
 
 impl Default for TextStyle {
@@ -137,6 +145,8 @@ impl Default for TextStyle {
             upside_down: false,
             vertical: false,
             annotative: false,
+            last_height: 0.0,
+            family_only: String::new(),
         }
     }
 }
