@@ -174,3 +174,40 @@ fn istcad_properties_values_are_edited_by_typing() {
     let after = radius(&h, &c).unwrap();
     assert!((after - 2.5).abs() < 1e-9, "Radius {before} → {after}: typing 2.5 and Enter changes it");
 }
+
+/// MText contents open in a box of several lines: Enter breaks a line, Ctrl+Enter applies.
+#[test]
+fn istcad_properties_contents_take_several_lines() {
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        istcad_app(),
+    );
+    h.run_steps(3);
+    let mtext = h.state().session.doc().ok().and_then(|d| {
+        d.model.iter().find(|e| matches!(e.kind, cadcraft_engine::doc::EntityKind::MText(_))).map(|e| e.handle.hex())
+    });
+    let Some(m) = mtext else { panic!("the sample has mtext") };
+    let contents = |h: &Harness<'_, CadApp>| {
+        let d = h.state().session.doc().unwrap();
+        d.model.iter().find(|e| e.handle.hex() == m).and_then(|e| match &e.kind {
+            cadcraft_engine::doc::EntityKind::MText(t) => Some(t.contents.clone()),
+            _ => None,
+        })
+    };
+    let _ = h.state_mut().run("select", json!({ "handles": [m] }));
+    let _ = h.state_mut().run("ui.istcad.properties", json!({ "on": true }));
+    h.run_steps(4);
+    let at = text_pos(&h, "Contents").expect("the Contents row is painted");
+    click(&mut h, at + vec2(150.0, 6.0));
+    h.run_steps(3);
+    h.event(egui::Event::Text("ONE".into()));
+    h.key_press(egui::Key::Enter);
+    h.event(egui::Event::Text("TWO".into()));
+    h.run_steps(1);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(contents(&h).as_deref(), Some("ONE\\PTWO"));
+}

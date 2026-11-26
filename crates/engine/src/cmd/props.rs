@@ -28,7 +28,8 @@ pub fn specs() -> Vec<CommandSpec> {
              circle and arc: centerX/Y/Z?, ellipse: centerX/Y/Z?, majorRadius?, minorRadius?, ratio?, polyline: width?, closed?, plinegen?, elevation?, \
              vertex (1 = first) with vertexX?/vertexY?, block reference: name? (another block), positionX/Y/Z?, scaleX/Y/Z?, \
              leader: dimStyle?, arrow?: bool, leaderType?: straight|spline, vertex with vertexX?/vertexY?, \
-             multileader: mleaderStyle?, leaderType?, arrowheadSize?, horizontalLanding?: bool, landingDistance?, landingX/Y?, and its text as mtext's keys, point: positionX/Y/Z?, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
+             multileader: mleaderStyle?, leaderType?, arrowheadSize?, horizontalLanding?: bool, landingDistance?, landingX/Y?, its text as mtext's keys, \
+             sourceBlock?, blockScale?, blockRotation? (block content), point: positionX/Y/Z?, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
              mtext: style?, justify?, lineSpacing?, lineSpacingDistance?, lineSpacingStyle?: atLeast | exactly, positionX/Y/Z?, \
              dimension: dimStyle?, textOverride?, textRotation?, textPositionX/Y?, prefix?, suffix?, altPrefix?, altSuffix?, dimScale?, precision?, \
              <dimension style variables (field or DIM* name, e.g. textHeight / DIMTXT) set as overrides of each dimension>, clearOverrides?, clear?: [variable]} \

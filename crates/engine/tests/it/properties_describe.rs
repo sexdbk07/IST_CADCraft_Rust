@@ -384,3 +384,22 @@ fn a_block_reference_can_show_another_block() {
     assert_eq!(row(&describe(&mut s, json!({ "handles": [i] })), "Misc", "name")["value"], "B");
     assert!(s.execute("properties.set", &json!({ "handles": [i], "name": "missing" })).is_err());
 }
+
+#[test]
+fn a_multileader_s_block_content_is_edited() {
+    let mut s = Session::new();
+    for name in ["A", "B"] {
+        s.execute("circle", &json!({ "center": [0, 0], "radius": 1 })).unwrap();
+        let hs = vec![last(&s)];
+        s.execute("block", &json!({ "name": name, "base": [0, 0], "handles": hs, "keep": "delete" })).unwrap();
+    }
+    s.execute("mleader", &json!({ "points": [[0, 0], [10, 10]], "block": "A" })).unwrap();
+    let m = last(&s);
+    let rows = describe(&mut s, json!({ "handles": [m] }));
+    assert_eq!(row(&rows, "Block", "sourceBlock")["value"], "A");
+    let r = s.execute("properties.set", &json!({ "handles": [m], "sourceBlock": "B", "blockScale": 2, "blockRotation": 30 })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let rows = describe(&mut s, json!({ "handles": [m] }));
+    assert_eq!((row(&rows, "Block", "sourceBlock")["value"].as_str(), num(&rows, "Block", "blockScale")), (Some("B"), 2.0));
+    assert!((num(&rows, "Block", "blockRotation") - 30.0).abs() < 1e-9);
+}

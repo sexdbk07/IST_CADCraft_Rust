@@ -989,13 +989,12 @@ fn mleader_groups(c: &Ctx, ents: &[&Entity], ms: &[&cadcraft_doc::MLeader]) -> V
             ],
         });
     } else if let Some(bs) = ms.iter().map(|m| m.block.as_ref()).collect::<Option<Vec<&cadcraft_doc::Insert>>>() {
-        let note = "The block content can't be changed here yet.";
-        let ro = |r: Row| Row { note: Some(note.into()), ..r.read_only() };
         groups.push(Group {
             name: "Block",
             rows: vec![
-                ro(c.row("sourceBlock", "Source block", Kind::Text, bs.iter().map(|b| json!(b.block)))),
-                ro(c.row("blockScale", "Block scale", Kind::Number, bs.iter().map(|b| n(b.scale.x)))),
+                c.choice("sourceBlock", "Source block", Kind::Choice, c.insertable_blocks(), bs.iter().map(|b| json!(b.block))),
+                c.row("blockScale", "Block scale", Kind::Number, bs.iter().map(|b| n(b.scale.x))),
+                c.row("blockRotation", "Block rotation", Kind::Direction, bs.iter().map(|b| n(b.rotation.to_degrees()))),
             ],
         });
     }

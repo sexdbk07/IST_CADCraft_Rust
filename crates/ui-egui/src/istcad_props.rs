@@ -43,6 +43,8 @@ enum Edit {
     /// A `properties.set` key taking a typed number.
     Number(&'static str),
     Text(&'static str),
+    /// Text contents of several lines (`\P` breaks), edited in a box under the row.
+    Contents(&'static str),
     /// Pick from `(value sent, label shown)`.
     Choice(&'static str, Vec<(Value, String)>),
     Toggle(&'static str, bool),
@@ -178,7 +180,12 @@ fn selection_box(app: &mut CadApp, ui: &mut egui::Ui, types: &[(String, usize)],
         Some(f) => format!("{f} ({})", types.iter().find(|(n, _)| n == f).map_or(0, |(_, c)| *c)),
         None => summary(types, count),
     };
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
+    // AutoCAD's three buttons sit right of the box: PICKADD, Select Objects, Quick Select.
+    let full = ui.available_width();
+    let (row, _) = ui.allocate_exact_size(vec2(full, 36.0), Sense::hover());
+    let rect = Rect::from_min_max(row.min, pos2(row.right() - 3.0 * 30.0, row.bottom()));
+    let resp = ui.interact(rect, ui.id().with("ist_selection_box"), Sense::click());
+    selection_buttons(app, ui, Rect::from_min_max(pos2(rect.right() + 2.0, row.top()), row.max));
     ui.painter().rect_filled(rect, 4.0, if resp.hovered() { t.control_hover.gamma_multiply(1.15) } else { BOX_FILL });
     let p = ui.painter().with_clip_rect(rect.shrink(2.0));
     p.text(pos2(rect.left() + 11.0, rect.center().y), Align2::LEFT_CENTER, &text, FontId::proportional(13.0), t.text);
@@ -207,6 +214,56 @@ fn selection_box(app: &mut CadApp, ui: &mut egui::Ui, types: &[(String, usize)],
     if let Some(f) = pick {
         app.istcad.props.filter = f;
         app.istcad.props.editing = None;
+    }
+}
+
+/// PICKADD (a "+" adds to the selection, a "1" replaces it), Select Objects and Quick Select.
+fn selection_buttons(app: &mut CadApp, ui: &mut egui::Ui, area: Rect) {
+    let t = Tokens::get();
+    let pickadd = cadcraft_engine::sysvars::get(&app.session, "PICKADD").and_then(|v| v.as_i64()).unwrap_or(1) != 0;
+    let tips = [
+        if pickadd { "PICKADD is on: picked objects are added to the selection" } else { "PICKADD is off: a pick replaces the selection" },
+        "Select objects",
+        "Quick Select",
+    ];
+    for (n, tip) in tips.iter().enumerate() {
+        let r = Rect::from_min_size(pos2(area.left() + 30.0 * n as f32, area.top() + 4.0), vec2(28.0, 28.0));
+        let resp = ui.interact(r, ui.id().with(("ist_props_button", n)), Sense::click());
+        let p = ui.painter();
+        p.rect_filled(r, 4.0, if resp.hovered() { t.control_hover } else { BOX_FILL });
+        let c = r.center();
+        let ink = VALUE_INK;
+        match n {
+            0 => {
+                p.text(c, Align2::CENTER_CENTER, if pickadd { "+" } else { "1" }, FontId::proportional(16.0), ink);
+            }
+            1 => {
+                // An arrow pointer.
+                let pts = [vec2(-5.0, -8.0), vec2(-5.0, 6.0), vec2(-1.5, 2.5), vec2(1.5, 8.0), vec2(3.5, 7.0), vec2(0.5, 1.5), vec2(5.0, 1.5)];
+                p.add(egui::Shape::closed_line(pts.iter().map(|v| c + *v).collect(), Stroke::new(1.3, ink)));
+            }
+            _ => {
+                // A funnel with a spark: the filter of Quick Select.
+                let pts = [vec2(-7.0, -6.0), vec2(7.0, -6.0), vec2(1.5, 1.0), vec2(1.5, 7.0), vec2(-1.5, 5.5), vec2(-1.5, 1.0)];
+                p.add(egui::Shape::closed_line(pts.iter().map(|v| c + *v).collect(), Stroke::new(1.3, ink)));
+            }
+        }
+        crate::icons::describe_control(ui, &resp, tip, None, false);
+        let resp = resp.on_hover_text(crate::i18n::t(tip));
+        if !resp.clicked() {
+            continue;
+        }
+        let done = match n {
+            0 => app.run("setvar", json!({ "name": "PICKADD", "value": i32::from(!pickadd) })).map(|_| ()),
+            1 => {
+                app.start("select");
+                Ok(())
+            }
+            _ => app.run("ui.dialog.qselect", json!({})).map(|_| ()),
+        };
+        if let Err(e) = done {
+            app.set_status(e);
+        }
     }
 }
 
@@ -343,6 +400,7 @@ fn from_desc(label: &str, r: &DescRow, choices: Vec<(Value, String)>) -> PropRow
         match r.kind {
             Kind::Bool => Edit::Toggle(r.key, r.value.as_bool().unwrap_or(false)),
             Kind::Number | Kind::Distance | Kind::Angle | Kind::Direction => Edit::Number(r.key),
+            Kind::Contents => Edit::Contents(r.key),
             _ => Edit::Text(r.key),
         }
     };
@@ -454,7 +512,9 @@ fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, hand
     if editing {
         edit_field(app, ui, value_rect, row, handles);
     } else {
-        let value = clipped(&p, &row.value, value_rect.width() - 13.0, VALUE_INK);
+        // Contents read on one line, a "·" where a line breaks.
+        let shown = if matches!(row.edit, Edit::Contents(_)) { row.value.replace("\\P", " · ") } else { row.value.clone() };
+        let value = clipped(&p, &shown, value_rect.width() - 13.0, VALUE_INK);
         p.galley(pos2(value_rect.right() - 9.0 - value.size().x, inner.center().y - value.size().y / 2.0), value, VALUE_INK);
     }
     crate::icons::describe_control(ui, &resp, &format!("{}: {}", row.label, row.value), None, false);
@@ -484,9 +544,15 @@ fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, hand
                 app.istcad.props.vertex = i;
             }
         }
-        Edit::Number(_) | Edit::Text(_) | Edit::Current { .. } | Edit::VertexCoord { .. } | Edit::View { .. } => {
+        Edit::Number(_) | Edit::Text(_) | Edit::Contents(_) | Edit::Current { .. } | Edit::VertexCoord { .. } | Edit::View { .. } => {
             if resp.clicked() {
-                let start = if row.value == "Multiple" { String::new() } else { row.value.trim_end_matches('°').to_string() };
+                let start = if row.value == "Multiple" {
+                    String::new()
+                } else if matches!(row.edit, Edit::Contents(_)) {
+                    row.value.replace("\\P", "\n")
+                } else {
+                    row.value.trim_end_matches('°').to_string()
+                };
                 app.istcad.props.editing = Some((row_id.to_string(), start));
                 app.istcad.props.focus_pending = true;
             }
@@ -536,12 +602,32 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
     let t = Tokens::get();
     let Some((_, text)) = app.istcad.props.editing.as_mut() else { return };
     ui.painter().rect(rect, 3.0, t.field, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
-    let edit = egui::TextEdit::singleline(text)
-        .frame(egui::Frame::NONE)
-        .text_color(VALUE_INK)
-        .align(egui::Align2::RIGHT_CENTER)
-        .margin(egui::Margin::symmetric(6, 2));
-    let resp = ui.put(rect, edit);
+    let contents = matches!(row.edit, Edit::Contents(_));
+    let resp = if contents {
+        // Text contents: a box of several lines under the row (Enter starts a new line;
+        // Ctrl+Enter or clicking elsewhere applies), as AutoCAD's palette opens one.
+        let width = (ui.max_rect().width() - 8.0).max(rect.width());
+        let at = pos2(ui.max_rect().right() - width, rect.bottom() + 2.0);
+        egui::Area::new(ui.id().with("ist_contents_editor"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(at)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).fill(t.field).stroke(Stroke::new(1.0, t.accent)).show(ui, |ui| {
+                    let r = ui.add(egui::TextEdit::multiline(text).desired_rows(5).desired_width(width - 16.0).text_color(VALUE_INK));
+                    ui.label(RichText::new(crate::tl!("Enter: new line · Ctrl+Enter: apply · Esc: cancel")).size(11.0).color(LABEL_INK));
+                    r
+                })
+                .inner
+            })
+            .inner
+    } else {
+        let edit = egui::TextEdit::singleline(text)
+            .frame(egui::Frame::NONE)
+            .text_color(VALUE_INK)
+            .align(egui::Align2::RIGHT_CENTER)
+            .margin(egui::Margin::symmetric(6, 2));
+        ui.put(rect, edit)
+    };
     if app.istcad.props.focus_pending {
         resp.request_focus();
         app.istcad.props.focus_pending = false;
@@ -556,10 +642,20 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
         app.istcad.props.editing = None;
         return;
     }
-    if !resp.lost_focus() {
+    let commit = contents && resp.has_focus() && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter));
+    if !resp.lost_focus() && !commit {
         return;
     }
     let typed = app.istcad.props.editing.take().map(|(_, s)| s).unwrap_or_default();
+    if contents {
+        let typed = typed.trim_end_matches(['\n', '\r']).to_string();
+        if let Edit::Contents(key) = &row.edit
+            && typed != row.value.replace("\\P", "\n")
+        {
+            apply(app, handles, json!({ *key: typed }));
+        }
+        return;
+    }
     let typed = typed.trim().trim_end_matches('°').trim().to_string();
     if typed.is_empty() || typed == row.value.trim_end_matches('°') {
         return;

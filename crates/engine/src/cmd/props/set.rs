@@ -260,6 +260,8 @@ struct Call<'a> {
     /// The block a block reference is switched to (its Name row), checked to exist and not to
     /// contain the block being edited.
     block: Option<String>,
+    /// The block a multileader's block content is switched to, checked as `block` is.
+    source_block: Option<String>,
     /// Each multileader style's landing distance, for Horizontal landing turned back on.
     mleader_doglegs: Vec<(String, f64)>,
     dim_vars: DimVars,
@@ -387,6 +389,10 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
         Some(n) => Some(block_to_use(s, n)?),
         None => None,
     };
+    let source_block = match str_param(p, "sourceBlock") {
+        Some(n) => Some(block_to_use(s, n)?),
+        None => None,
+    };
     let d = s.doc()?;
     let dim_vars = DimVars::new(d, p)?;
     // A pattern must be one each hatch can take, as HATCHEDIT refuses others.
@@ -402,7 +408,7 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     let prep = Prepared::new(d, p, &hs);
     let anno_scale = d.current_anno_scale();
     let mleader_doglegs: Vec<(String, f64)> = d.mleader_styles.iter().map(|m| (m.name.clone(), m.dogleg)).collect();
-    let c = Call { p, color, transparency, thickness, lineweight, linetype, dim_style, text_style, mleader_style, block, mleader_doglegs, dim_vars, prep, anno_scale };
+    let c = Call { p, color, transparency, thickness, lineweight, linetype, dim_style, text_style, mleader_style, block, source_block, mleader_doglegs, dim_vars, prep, anno_scale };
     // A failed call changes nothing (a command's error doesn't undo what it did), so the drawing
     // is taken for writing, and the layer made, only after every check.
     let d = s.doc_mut()?;
@@ -514,6 +520,21 @@ fn mleader<'c>(m: &mut cadcraft_doc::MLeader, c: &'c Call<'_>, used: &mut Used<'
     // The text: as an MTEXT's (contents, style, justification, height, rotation, spacing, width).
     if let Some(t) = &mut m.text {
         mtext(t, c, used);
+    }
+    // Block content: another block, its scale and rotation (about the point it is placed by).
+    if let Some(b) = &mut m.block {
+        if let Some(name) = &c.source_block {
+            b.block.clone_from(name);
+            used.insert("sourceBlock");
+        }
+        if let Some(x) = c.num("blockScale").filter(|x| *x > 0.0 && *x < 1e12) {
+            scale_insert(b, x);
+            used.insert("blockScale");
+        }
+        if let Some(x) = c.num("blockRotation") {
+            rotate_insert(b, x);
+            used.insert("blockRotation");
+        }
     }
 }
 
@@ -889,6 +910,46 @@ fn ellipse(el: &mut cadcraft_doc::Ellipse, c: &Call<'_>, used: &mut Used<'_>) {
     }
 }
 
+/// Turn a block reference to `deg` degrees: the attached text turns with it, around its
+/// insertion point (as ROTATE does).
+fn rotate_insert(i: &mut Insert, deg: f64) {
+    let turn = deg.to_radians() - i.rotation;
+    i.rotation = deg.to_radians();
+    let base = i.insert.xy();
+    for a in &mut i.attribs {
+        let t = &mut a.text;
+        for q in std::iter::once(&mut t.insert).chain(t.align_pt.as_mut()) {
+            let r = q.xy().rotate_about(base, turn);
+            q.x = r.x;
+            q.y = r.y;
+        }
+        t.rotation = cadcraft_geom::norm_angle(t.rotation + turn);
+        if let Some(ml) = &mut a.multiline {
+            let r = ml.mtext.insert.xy().rotate_about(base, turn);
+            ml.mtext.insert.x = r.x;
+            ml.mtext.insert.y = r.y;
+            ml.mtext.rotation = cadcraft_geom::norm_angle(ml.mtext.rotation + turn);
+        }
+    }
+}
+
+/// Scale a block reference to `x` on every axis (not 0). A new positive scale carries the
+/// attached attribute text with it, like SCALE about the insertion point.
+fn scale_insert(i: &mut Insert, x: f64) {
+    if x > 0.0 && i.scale.x > 0.0 {
+        let m = cadcraft_geom::Mat3::scale_about(i.insert.xy(), x / i.scale.x);
+        for a in &mut i.attribs {
+            let mut k = EntityKind::Text(a.text.clone());
+            k.transform(&m);
+            if let EntityKind::Text(t) = k {
+                a.text = t;
+            }
+            a.transform_multiline(&m);
+        }
+    }
+    i.scale = Vec3::new(x, x, x);
+}
+
 fn insert(i: &mut Insert, c: &Call<'_>, used: &mut Used<'_>) {
     // Name: the reference shows another block; its attributes stay as they are.
     if let Some(b) = &c.block {
@@ -896,41 +957,11 @@ fn insert(i: &mut Insert, c: &Call<'_>, used: &mut Used<'_>) {
         used.insert("name");
     }
     if let Some(x) = c.num("rotation") {
-        let turn = x.to_radians() - i.rotation;
-        i.rotation = x.to_radians();
-        // The attached text turns with the reference, around its insertion point (as ROTATE does).
-        let base = i.insert.xy();
-        for a in &mut i.attribs {
-            let t = &mut a.text;
-            for q in std::iter::once(&mut t.insert).chain(t.align_pt.as_mut()) {
-                let r = q.xy().rotate_about(base, turn);
-                q.x = r.x;
-                q.y = r.y;
-            }
-            t.rotation = cadcraft_geom::norm_angle(t.rotation + turn);
-            if let Some(ml) = &mut a.multiline {
-                let r = ml.mtext.insert.xy().rotate_about(base, turn);
-                ml.mtext.insert.x = r.x;
-                ml.mtext.insert.y = r.y;
-                ml.mtext.rotation = cadcraft_geom::norm_angle(ml.mtext.rotation + turn);
-            }
-        }
+        rotate_insert(i, x);
         used.insert("rotation");
     }
     if let Some(x) = c.num("scale").filter(|x| *x != 0.0) {
-        // A new positive scale carries the attached attribute text with it, like SCALE about the insertion point.
-        if x > 0.0 && i.scale.x > 0.0 {
-            let m = cadcraft_geom::Mat3::scale_about(i.insert.xy(), x / i.scale.x);
-            for a in &mut i.attribs {
-                let mut k = EntityKind::Text(a.text.clone());
-                k.transform(&m);
-                if let EntityKind::Text(t) = k {
-                    a.text = t;
-                }
-                a.transform_multiline(&m);
-            }
-        }
-        i.scale = Vec3::new(x, x, x);
+        scale_insert(i, x);
         used.insert("scale");
     }
     // Scale X / Y / Z one at a time: the attached text stretches with the reference along the
