@@ -394,7 +394,11 @@ fn user_qsave(app: &mut CadApp) -> Option<Result<Value, String>> {
     if app.session.state().is_ok_and(|s| s.path.is_none()) {
         return run_ui_command(app, "ui.saveas", &Value::Null);
     }
-    app.hold_lossy_save().then_some(Ok(Value::Null))
+    if app.hold_lossy_save() {
+        return Some(Ok(Value::Null));
+    }
+    // Written on a worker thread when it can be, so the window keeps responding.
+    app.start_background_save()
 }
 
 fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {

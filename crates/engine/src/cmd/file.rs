@@ -798,6 +798,85 @@ fn commit_save(s: &mut Session, path: &str, bytes: &[u8], store: impl FnOnce(&st
     Ok(bytes.len())
 }
 
+/// QSAVE in three steps, so a host can encode and write the file off its UI thread: a DWG takes
+/// a second or more for a large drawing. [`begin_qsave`] takes the drawing as it is now (a cheap
+/// copy-on-write snapshot), [`SaveJob::run`] writes it from any thread, and [`finish_qsave`]
+/// marks the drawing saved as of the snapshot and reports what [`run_qsave_reporting`] reports.
+/// Edits made while the file is written stay unsaved. Files that need more than this (binary
+/// DXF, images, an in-place reference edit) are refused here: save them with QSAVE.
+pub struct SaveJob {
+    path: String,
+    drawing: std::sync::Arc<Drawing>,
+    version: Version,
+    folder: Option<String>,
+    uid: u64,
+}
+
+/// What [`SaveJob::run`] gives back: the bytes written and what the file couldn't keep.
+pub type SaveOutcome = std::result::Result<(usize, std::collections::BTreeMap<String, usize>), String>;
+
+/// Start a QSAVE of the active drawing to its own file; see [`SaveJob`].
+pub fn begin_qsave(s: &Session) -> Result<SaveJob> {
+    let st = s.state()?;
+    let path = st.path.clone().ok_or_else(|| bad("qsave", "drawing has no file name yet; use saveas {path}"))?;
+    if s.doc()?.refedit.is_some() {
+        return Err(bad("qsave", "A block reference is being edited in place: finish with REFCLOSE (Save or Discard) before saving."));
+    }
+    if !is_drawing_file(&path) || (st.binary_dxf && is_dxf(&path)) {
+        return Err(bad("qsave", "this file is saved in one step; use qsave"));
+    }
+    io().ok_or_else(|| bad("qsave", "file formats are not available in this build"))?;
+    Ok(SaveJob { version: drawing_version(s, &path), folder: new_folder(&path), drawing: st.drawing().clone(), uid: st.uid, path })
+}
+
+impl SaveJob {
+    /// The file being written.
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+    /// The `uid` of the drawing being saved.
+    pub fn uid(&self) -> u64 {
+        self.uid
+    }
+    /// Encode the snapshot and write the file (with its backup, atomically, as QSAVE does). Runs
+    /// on any thread; touches no session.
+    pub fn run(&self) -> SaveOutcome {
+        let hooks = io().ok_or_else(|| "file formats are not available in this build".to_string())?;
+        let lost = if drops_unknown(&self.path) { not_saved_as(&self.drawing, self.version) } else { Default::default() };
+        let bytes = (hooks.write)(&self.drawing, &self.path)?;
+        store(&self.path, &bytes).map_err(|e| e.to_string())?;
+        Ok((bytes.len(), lost))
+    }
+}
+
+/// End a QSAVE started with [`begin_qsave`]: mark the drawing saved as of its snapshot (when it is
+/// still open) and report as QSAVE does. The reports that read the drawing are made only when it
+/// is still the active one.
+pub fn finish_qsave(s: &mut Session, job: SaveJob, outcome: SaveOutcome) -> Result<Value> {
+    let (n, lost) = outcome.map_err(|e| bad("qsave", e))?;
+    let mut r = saved(&job.path, n);
+    let Some(i) = s.docs.iter().position(|d| d.uid == job.uid) else { return Ok(r) };
+    if let Some(st) = s.docs.get_mut(i) {
+        st.saved = job.drawing.clone();
+        st.path = Some(job.path.clone());
+        st.title = file_name(&job.path);
+        // A BEgin group still open when the drawing is saved ends there.
+        st.end_undo_group();
+    }
+    report_new_folder(s, &mut r, job.folder);
+    let active = s.active == i;
+    if drops_unknown(&job.path) {
+        report_not_saved(s, &mut r, &lost);
+    } else if is_dxf_file(&job.path) && active {
+        let lost = host_dxf_lost(s, job.version);
+        report_lost(s, &mut r, "drawing.dxf", job.version, &lost);
+    }
+    if active {
+        report_fonts(s, &mut r);
+    }
+    Ok(r)
+}
+
 /// The save result; on the web it also names the file the browser downloaded.
 fn saved(path: &str, bytes: usize) -> Value {
     let mut r = json!({ "path": path, "bytes": bytes });
@@ -1345,5 +1424,47 @@ mod pr193_tests {
         assert!(!st.is_dirty());
         assert_eq!((st.path.as_deref(), st.title.as_str()), (Some("a/Owned.dxf"), "Owned.dxf"));
         assert_eq!(saved("a/Owned.dxf", n)["bytes"], 6);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod background_save_tests {
+    use super::*;
+    use crate::temp_dir::TempDir;
+
+    /// A QSAVE written off the UI thread saves the drawing as it was when it started: an edit made
+    /// meanwhile stays unsaved, and a save with no edit since leaves the drawing clean.
+    #[test]
+    fn background_qsave_saves_the_snapshot_and_keeps_later_edits_unsaved() {
+        set_io(IoHooks {
+            read: |_, _| Err("no reader in tests".into()),
+            write: |d, name| Ok(if name == "probe.bg" { b"bg".to_vec() } else { format!("0\nSECTION\n999\n{}\n", d.model.len()).into_bytes() }),
+            plot: None,
+        });
+        // The hooks are process-wide: another test's may be the ones installed.
+        if !io().is_some_and(|h| (h.write)(&Drawing::new_imperial(), "probe.bg").is_ok_and(|b| b == b"bg")) {
+            return;
+        }
+        let dir = TempDir::new("cc-bg-save");
+        let path = dir.path_str("plan.dxf");
+        let mut s = Session::new();
+        s.cmdline("circle 4,4 1").unwrap();
+        s.state_mut().unwrap().path = Some(path.clone());
+        let job = begin_qsave(&s).unwrap();
+        s.cmdline("circle 8,8 1").unwrap();
+        let (job, outcome) = std::thread::spawn(move || {
+            let outcome = job.run();
+            (job, outcome)
+        })
+        .join()
+        .unwrap();
+        finish_qsave(&mut s, job, outcome).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("\n999\n1\n"), "the file holds the drawing as the save started: {written}");
+        assert!(s.state().unwrap().is_dirty(), "the edit made while saving stays unsaved");
+        let job = begin_qsave(&s).unwrap();
+        let outcome = job.run();
+        finish_qsave(&mut s, job, outcome).unwrap();
+        assert!(!s.state().unwrap().is_dirty());
     }
 }

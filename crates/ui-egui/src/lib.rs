@@ -66,6 +66,7 @@ pub mod managers;
 pub mod menus;
 pub mod modal;
 pub mod opening;
+pub mod saving;
 pub mod options;
 pub mod os_window;
 pub mod palettes;
@@ -314,6 +315,8 @@ pub struct CadApp {
     pub status: Option<(String, f64)>,
     /// Drawings being read on worker threads ([`opening`]).
     pub opening: opening::Opening,
+    /// The QSAVE being written in the background, if any.
+    pub saving: saving::Saving,
     pub integrated_titlebar: bool,
     /// The iStCAD shell (title bar, tool bars, auto-hide strip and command dock).
     pub istcad: istcad::Shell,
@@ -417,6 +420,7 @@ impl CadApp {
             cmd: cmdline::CmdLine::default(),
             status: None,
             opening: opening::Opening::default(),
+            saving: saving::Saving::default(),
             integrated_titlebar: false,
             istcad: istcad::Shell::default(),
             control_rx: None,
@@ -908,6 +912,65 @@ impl CadApp {
         }
     }
 
+    /// Start QSAVE of the active drawing in the background when it can be ([`saving`]): the
+    /// drawing has its file and the native build has threads. `None` when the caller should save
+    /// in one step instead.
+    pub(crate) fn start_background_save(&mut self) -> Option<Result<Value, String>> {
+        if cfg!(target_arch = "wasm32") {
+            return None;
+        }
+        if self.saving.busy() {
+            let msg = crate::tl!("A save is still running; wait for it to finish.").to_string();
+            self.set_status(msg.clone());
+            return Some(Err(msg));
+        }
+        let job = cadcraft_engine::cmd::file::begin_qsave(&self.session).ok()?;
+        let path = job.path().to_string();
+        if !self.saving.start(job) {
+            return None;
+        }
+        Some(Ok(json!({ "path": path, "background": true })))
+    }
+
+    /// Finish a background save that has ended: mark the drawing saved and report as QSAVE does.
+    /// Called every frame.
+    pub fn finish_saving(&mut self) {
+        let polled = self.saving.poll();
+        self.save_finished(polled);
+    }
+
+    /// Wait (up to `limit`) for a background save before the window closes or the app quits, so
+    /// the drawing isn't reported unsaved while its file is being written.
+    pub fn wait_for_saving(&mut self, limit: std::time::Duration) {
+        let polled = self.saving.wait(limit);
+        self.save_finished(polled);
+    }
+
+    fn save_finished(&mut self, polled: saving::Polled) {
+        match polled {
+            saving::Polled::Nothing => {}
+            saving::Polled::Lost(e) => {
+                self.session.echo(e.clone());
+                self.set_status(e);
+            }
+            saving::Polled::Done(job, outcome) => {
+                let path = job.path().to_string();
+                match cadcraft_engine::cmd::file::finish_qsave(&mut self.session, job, outcome) {
+                    Ok(_) => {
+                        let name = Path::new(&path).file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+                        self.set_status(crate::tf!("Saved {name}", name = name));
+                        self.remember_recent(path);
+                    }
+                    Err(e) => {
+                        let e = e.to_string();
+                        self.session.echo(e.clone());
+                        self.set_status(e);
+                    }
+                }
+            }
+        }
+    }
+
     /// Reuse the existing document through the normal tab-switch command, including symlink paths.
     fn select_open_drawing(&mut self, path: &Path) -> bool {
         let existing = self.session.docs.iter().position(|d| d.path.as_deref().is_some_and(|p| opening::same_path(Path::new(p), path)));
@@ -1017,6 +1080,7 @@ impl CadApp {
         self.drain_control(ctx);
         self.finish_pick(ctx);
         self.finish_opening();
+        self.finish_saving();
         // Finishing an open switches to the new drawing.
         capture::note_identity(self, ctx);
         capture::drain(self, ctx);
@@ -1046,7 +1110,7 @@ impl CadApp {
         if !self.synthetic.is_empty() || self.synthetic_injected {
             request_paint_while_hidden(ctx);
         }
-        if self.session.lisp_busy() || self.opening.busy() {
+        if self.session.lisp_busy() || self.opening.busy() || self.saving.busy() {
             request_paint_while_hidden(ctx);
         }
         capture::request_hidden_paint(self, ctx);
@@ -1275,6 +1339,7 @@ impl CadApp {
             istcad::quick_bar(self, ui.ctx(), central.response.rect);
         }
         self.opening.show(ui.ctx());
+        self.saving.show(ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
         updates_ui::show(self, ui.ctx());
         dialogs::show(self, ui.ctx());
