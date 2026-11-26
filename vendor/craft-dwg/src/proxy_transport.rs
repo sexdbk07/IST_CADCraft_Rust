@@ -218,9 +218,15 @@ pub(super) fn text_pairs(dxf: &[u8]) -> Option<impl Iterator<Item = Option<(i32,
                 // The decoder uses UTF-8 with Latin-1 fallback when no encoding was declared.
                 std::str::from_utf8(value).map_or_else(|_| value.iter().map(|&b| char::from(b)).collect(), str::to_string)
             };
-            let text = decode_legacy_escapes(&text);
+            // CIF and MIF escapes (`\U+`, `\M+`) start with a backslash and control characters
+            // with a caret: most values have neither and are kept as they are, without copies.
+            let text = if text.contains('\\') { decode_legacy_escapes(&text) } else { text };
             // DXF's escaped control characters are decoded after CIF/MIF, as in the bridge.
-            let text = text.replace("^J", "\n").replace("^M", "\r").replace("^I", "\t").replace("^ ", "^");
+            let text = if text.contains('^') {
+                text.replace("^J", "\n").replace("^M", "\r").replace("^I", "\t").replace("^ ", "^")
+            } else {
+                text
+            };
             Some((code, text))
         };
         Some(pair())
