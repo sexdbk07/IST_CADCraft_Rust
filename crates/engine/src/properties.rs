@@ -822,10 +822,10 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
         return vec![geometry(vec![
             c.row("startX", "Start X", Kind::Distance, ls.iter().map(|l| n(l.a.x))),
             c.row("startY", "Start Y", Kind::Distance, ls.iter().map(|l| n(l.a.y))),
-            c.row("startZ", "Start Z", Kind::Distance, ls.iter().map(|l| n(l.a.z))).read_only(),
+            c.row("startZ", "Start Z", Kind::Distance, ls.iter().map(|l| n(l.a.z))),
             c.row("endX", "End X", Kind::Distance, ls.iter().map(|l| n(l.b.x))),
             c.row("endY", "End Y", Kind::Distance, ls.iter().map(|l| n(l.b.y))),
-            c.row("endZ", "End Z", Kind::Distance, ls.iter().map(|l| n(l.b.z))).read_only(),
+            c.row("endZ", "End Z", Kind::Distance, ls.iter().map(|l| n(l.b.z))),
             c.row("deltaX", "Delta X", Kind::Distance, ls.iter().map(|l| n(delta(l).x))).read_only(),
             c.row("deltaY", "Delta Y", Kind::Distance, ls.iter().map(|l| n(delta(l).y))).read_only(),
             c.row("length", "Length", Kind::Distance, ls.iter().map(|l| n(delta(l).len()))).quick(),
@@ -836,7 +836,7 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
         return vec![geometry(vec![
             c.row("centerX", "Center X", Kind::Distance, cs.iter().map(|x| n(x.center.x))),
             c.row("centerY", "Center Y", Kind::Distance, cs.iter().map(|x| n(x.center.y))),
-            c.row("centerZ", "Center Z", Kind::Distance, cs.iter().map(|x| n(x.center.z))).read_only(),
+            c.row("centerZ", "Center Z", Kind::Distance, cs.iter().map(|x| n(x.center.z))),
             c.row("radius", "Radius", Kind::Distance, cs.iter().map(|x| n(x.radius))).quick(),
             c.row("diameter", "Diameter", Kind::Distance, cs.iter().map(|x| n(x.radius * 2.0))),
             c.row("circumference", "Circumference", Kind::Distance, cs.iter().map(|x| n(x.radius * cadcraft_geom::TAU))),
@@ -848,7 +848,7 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
         return vec![geometry(vec![
             c.row("centerX", "Center X", Kind::Distance, arcs.iter().map(|a| n(a.center.x))),
             c.row("centerY", "Center Y", Kind::Distance, arcs.iter().map(|a| n(a.center.y))),
-            c.row("centerZ", "Center Z", Kind::Distance, arcs.iter().map(|a| n(a.center.z))).read_only(),
+            c.row("centerZ", "Center Z", Kind::Distance, arcs.iter().map(|a| n(a.center.z))),
             c.row("radius", "Radius", Kind::Distance, arcs.iter().map(|a| n(a.radius))).quick(),
             c.row("startAngle", "Start angle", Kind::Angle, arcs.iter().map(|a| n(a.start.to_degrees()))),
             c.row("endAngle", "End angle", Kind::Angle, arcs.iter().map(|a| n(a.end.to_degrees()))),
@@ -861,7 +861,7 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
         let geometry_rows = vec![
             c.row("vertices", "Vertices", Kind::Number, pls.iter().map(|pl| json!(pl.vertices.len()))).read_only(),
             c.row("width", "Global width", Kind::Distance, pls.iter().map(|pl| n(pl.const_width))),
-            c.row("elevation", "Elevation", Kind::Distance, pls.iter().map(|pl| n(pl.elevation))).read_only(),
+            c.row("elevation", "Elevation", Kind::Distance, pls.iter().map(|pl| n(pl.elevation))),
             // AutoCAD measures an open polyline's area as if it were closed.
             c.row("area", "Area", Kind::Number, pls.iter().map(|pl| n(geom(pl, true).area().abs()))).read_only(),
             c.row("length", "Length", Kind::Distance, pls.iter().map(|pl| n(geom(pl, pl.closed).len()))).read_only(),
@@ -876,41 +876,28 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
         return vec![geometry(vec![
             c.row("positionX", "Position X", Kind::Distance, pts.iter().map(|p| n(p.p.x))),
             c.row("positionY", "Position Y", Kind::Distance, pts.iter().map(|p| n(p.p.y))),
-            c.row("positionZ", "Position Z", Kind::Distance, pts.iter().map(|p| n(p.p.z))).read_only(),
+            c.row("positionZ", "Position Z", Kind::Distance, pts.iter().map(|p| n(p.p.z))),
         ])];
     }
     if let Some(els) = all_of(ents, |k| if let EntityKind::Ellipse(x) = k { Some(x) } else { None }) {
-        let note = "Change an ellipse with grips, SCALE or ROTATE.";
-        let ro = |r: Row| Row { note: Some(note.into()), ..r.read_only() };
         return vec![geometry(vec![
-            ro(c.row("centerX", "Center X", Kind::Distance, els.iter().map(|e| n(e.center.x)))),
-            ro(c.row("centerY", "Center Y", Kind::Distance, els.iter().map(|e| n(e.center.y)))),
-            ro(c.row("majorRadius", "Major radius", Kind::Distance, els.iter().map(|e| n(e.major.xy().len())))),
-            ro(c.row("minorRadius", "Minor radius", Kind::Distance, els.iter().map(|e| n(e.major.xy().len() * e.ratio)))),
-            ro(c.row("ratio", "Radius ratio", Kind::Number, els.iter().map(|e| n(e.ratio)))),
+            c.row("centerX", "Center X", Kind::Distance, els.iter().map(|e| n(e.center.x))),
+            c.row("centerY", "Center Y", Kind::Distance, els.iter().map(|e| n(e.center.y))),
+            c.row("centerZ", "Center Z", Kind::Distance, els.iter().map(|e| n(e.center.z))),
+            c.row("majorRadius", "Major radius", Kind::Distance, els.iter().map(|e| n(e.major.xy().len()))),
+            c.row("minorRadius", "Minor radius", Kind::Distance, els.iter().map(|e| n(e.major.xy().len() * e.ratio))),
+            c.row("ratio", "Radius ratio", Kind::Number, els.iter().map(|e| n(e.ratio))),
         ])];
     }
     if let Some(ins) = all_of(ents, |k| if let EntityKind::Insert(x) = k { Some(x) } else { None }) {
-        let note = "Scale X, Y and Z change together: use the Scale row, or SCALE.";
-        let axis = |r: Row| Row { note: Some(note.into()), ..r.read_only() };
-        // One scale for references scaled alike on every axis.
-        let uniform = |i: &cadcraft_doc::Insert| {
-            let s = i.scale;
-            if (s.x - s.y).abs() < 1e-12 && (s.x - s.z).abs() < 1e-12 { n(s.x) } else { json!(VARIES) }
-        };
-        let mut scale = c.row("scale", "Scale", Kind::Number, ins.iter().copied().map(uniform));
-        if scale.value == json!(VARIES) {
-            (scale.value, scale.varies, scale.display) = (Value::Null, true, VARIES.to_string());
-        }
         return vec![
             geometry(vec![
                 c.row("positionX", "Position X", Kind::Distance, ins.iter().map(|i| n(i.insert.x))),
                 c.row("positionY", "Position Y", Kind::Distance, ins.iter().map(|i| n(i.insert.y))),
-                c.row("positionZ", "Position Z", Kind::Distance, ins.iter().map(|i| n(i.insert.z))).read_only(),
-                axis(c.row("scaleX", "Scale X", Kind::Number, ins.iter().map(|i| n(i.scale.x)))),
-                axis(c.row("scaleY", "Scale Y", Kind::Number, ins.iter().map(|i| n(i.scale.y)))),
-                axis(c.row("scaleZ", "Scale Z", Kind::Number, ins.iter().map(|i| n(i.scale.z)))),
-                scale,
+                c.row("positionZ", "Position Z", Kind::Distance, ins.iter().map(|i| n(i.insert.z))),
+                c.row("scaleX", "Scale X", Kind::Number, ins.iter().map(|i| n(i.scale.x))),
+                c.row("scaleY", "Scale Y", Kind::Number, ins.iter().map(|i| n(i.scale.y))),
+                c.row("scaleZ", "Scale Z", Kind::Number, ins.iter().map(|i| n(i.scale.z))),
             ]),
             Group {
                 name: "Misc",

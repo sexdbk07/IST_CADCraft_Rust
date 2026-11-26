@@ -49,6 +49,12 @@ enum Edit {
     /// No selection: a setting for new objects (current layer, color, linetype…), set by running
     /// `cmd` with `base` and `{param: value}`; picked from `choices`, or typed when there are none.
     Current { cmd: &'static str, base: Value, param: &'static str, choices: Vec<(Value, String)> },
+    /// A polyline's Current vertex, one of `n`.
+    Vertex(usize),
+    /// The current vertex's X (or Y): `properties.set {vertex, vertexX | vertexY}`.
+    VertexCoord { x: bool, index: usize },
+    /// The view's centre X (0), Y (1) or height (2): ZOOM Center.
+    View { axis: u8, center: (f64, f64), height: f64 },
 }
 
 /// One palette row.
@@ -86,6 +92,8 @@ pub struct State {
     editing: Option<(String, String)>,
     /// Focus the edit field on the frame it opens.
     focus_pending: bool,
+    /// A polyline's Current vertex (0 for the first), as AutoCAD's palette steps through them.
+    vertex: usize,
 }
 
 /// Show or hide the palette (Ctrl+1, PROPERTIES), as iStCAD's `TogglePropertiesPalette`, which
@@ -126,7 +134,7 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
                 Some(f) => sel.iter().copied().filter(|h| doc.entity(*h).is_some_and(|e| e.kind.type_name() == f)).collect(),
                 None => sel.clone(),
             };
-            let sections = sections(doc, &handles, view);
+            let sections = sections(doc, &handles, view, app.istcad.props.vertex);
             app.istcad.props.filter = filter;
             selection_box(app, ui, &types, sel.len());
             ui.add_space(5.0);
@@ -207,7 +215,7 @@ fn selection_box(app: &mut CadApp, ui: &mut egui::Ui, types: &[(String, usize)],
 /// The palette's sections for `handles`, in iStCAD's order: General, the engine's groups for
 /// the selected type (Geometry, Text, Pattern, a dimension's Lines & Arrows … Tolerances), View
 /// (closed) and Misc. With nothing selected, General holds the settings new objects get.
-fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::View>) -> Vec<Section> {
+fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::View>, vertex: usize) -> Vec<Section> {
     let units = Units::of(doc);
     let desc = (!handles.is_empty()).then(|| properties::describe(doc, handles, None));
     let general_rows = desc.as_ref().and_then(|d| d.groups.iter().find(|g| g.name == "General")).map(|g| g.rows.clone()).unwrap_or_default();
@@ -254,21 +262,42 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
         if g.name == "Misc" {
             misc.splice(0..0, rows);
         } else {
-            out.push(Section { title: g.name, open_by_default: true, rows: rows.collect() });
+            let mut rows: Vec<PropRow> = rows.collect();
+            if g.name == "Geometry" {
+                rows.splice(0..0, vertex_rows(doc, handles, vertex, &units));
+            }
+            out.push(Section { title: g.name, open_by_default: true, rows });
         }
     }
+    // The view: typing a centre or height zooms there (ZOOM Center).
     let view_rows = view
         .map(|v| {
+            let at = (v.center.x, v.center.y);
             vec![
-                PropRow::read("Center X", units.distance(v.center.x)),
-                PropRow::read("Center Y", units.distance(v.center.y)),
-                PropRow::read("Height", units.distance(v.height)),
+                PropRow::new("Center X", units.distance(v.center.x), Edit::View { axis: 0, center: at, height: v.height }),
+                PropRow::new("Center Y", units.distance(v.center.y), Edit::View { axis: 1, center: at, height: v.height }),
+                PropRow::new("Height", units.distance(v.height), Edit::View { axis: 2, center: at, height: v.height }),
             ]
         })
         .unwrap_or_default();
     out.push(Section { title: "View", open_by_default: false, rows: view_rows });
     out.push(Section { title: "Misc", open_by_default: true, rows: misc });
     out
+}
+
+/// One polyline's Current vertex (a list to step through) and that vertex's X and Y, as
+/// AutoCAD's palette shows them first under Geometry.
+fn vertex_rows(doc: &Drawing, handles: &[Handle], vertex: usize, units: &Units) -> Vec<PropRow> {
+    let [h] = handles else { return Vec::new() };
+    let Some(cadcraft_engine::doc::EntityKind::LwPolyline(pl)) = doc.entity(*h).map(|e| &e.kind) else { return Vec::new() };
+    let n = pl.vertices.len();
+    let Some(v) = pl.vertices.get(vertex.min(n.saturating_sub(1))) else { return Vec::new() };
+    let index = vertex.min(n - 1);
+    vec![
+        PropRow::new("Current vertex", (index + 1).to_string(), Edit::Vertex(n)),
+        PropRow::new("Vertex X", units.distance(v.p.x), Edit::VertexCoord { x: true, index }),
+        PropRow::new("Vertex Y", units.distance(v.p.y), Edit::VertexCoord { x: false, index }),
+    ]
 }
 
 /// With nothing selected, AutoCAD's General rows are the settings new objects get (CLAYER,
@@ -444,7 +473,13 @@ fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, hand
                 apply(app, handles, json!({ *key: !*on }));
             }
         }
-        Edit::Number(_) | Edit::Text(_) | Edit::Current { .. } => {
+        Edit::Vertex(n) => {
+            let options: Vec<(Value, String)> = (1..=*n).map(|i| (json!(i - 1), i.to_string())).collect();
+            if let Some(i) = pick(&resp, value_rect, row, &options).and_then(|v| v.as_u64()).and_then(|i| usize::try_from(i).ok()) {
+                app.istcad.props.vertex = i;
+            }
+        }
+        Edit::Number(_) | Edit::Text(_) | Edit::Current { .. } | Edit::VertexCoord { .. } | Edit::View { .. } => {
             if resp.clicked() {
                 let start = if row.value == "Multiple" { String::new() } else { row.value.trim_end_matches('°').to_string() };
                 app.istcad.props.editing = Some((row_id.to_string(), start));
@@ -505,6 +540,11 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
     if app.istcad.props.focus_pending {
         resp.request_focus();
         app.istcad.props.focus_pending = false;
+        // The value opens selected, as AutoCAD's does: typing replaces it.
+        let mut state = egui::text_edit::TextEditState::load(ui.ctx(), resp.id).unwrap_or_default();
+        let all = app.istcad.props.editing.as_ref().map(|(_, t)| egui::text_selection::CCursorRange::select_all_str(t));
+        state.cursor.set_char_range(all);
+        state.store(ui.ctx(), resp.id);
     }
     let cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
     if cancel {
@@ -527,6 +567,29 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
                 return;
             };
             json!({ *key: v })
+        }
+        Edit::VertexCoord { x, index } => {
+            let Some(v) = number(&typed) else {
+                app.set_status(format!("{}: \"{typed}\" is not a number", row.label));
+                return;
+            };
+            json!({ "vertex": index + 1, (if *x { "vertexX" } else { "vertexY" }): v })
+        }
+        Edit::View { axis, center, height } => {
+            let Some(v) = number(&typed) else {
+                app.set_status(format!("{}: \"{typed}\" is not a number", row.label));
+                return;
+            };
+            let (mut c, mut h) = (*center, *height);
+            match axis {
+                0 => c.0 = v,
+                1 => c.1 = v,
+                _ => h = v,
+            }
+            if let Err(e) = app.run("zoom", json!({ "mode": "center", "center": [c.0, c.1], "height": h })) {
+                app.set_status(e);
+            }
+            return;
         }
         Edit::Current { cmd, base, param, .. } => {
             // A number where one was typed (Linetype scale, Thickness, Transparency %), else the text.

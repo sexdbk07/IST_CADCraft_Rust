@@ -16,15 +16,18 @@ use crate::cmd::{bad, point_value, str_param, targets};
 use crate::properties::{LINE_PITCH, is_dim_linetype, join_post, split_post};
 use crate::{Result, Session};
 
-/// Set `p`'s x (or y) to `v` when given, noting `key` as used.
-fn set_axis(p: &mut Vec3, v: Option<f64>, x: bool, key: &'static str, used: &mut Used<'_>) {
-    let Some(v) = v else { return };
-    if x {
-        p.x = v;
-    } else {
-        p.y = v;
+/// One coordinate of `p` at a time, the others kept: `keys` name x, y and z (the palette's
+/// Start X … Center Z rows).
+fn set_coords(p: &mut Vec3, c: &Call<'_>, keys: [&'static str; 3], used: &mut Used<'_>) {
+    for (i, key) in keys.into_iter().enumerate() {
+        let Some(v) = c.num(key) else { continue };
+        match i {
+            0 => p.x = v,
+            1 => p.y = v,
+            _ => p.z = v,
+        }
+        used.insert(key);
     }
-    used.insert(key);
 }
 
 /// A block reference's or point's Position X / Position Y: the object moves there, attributes
@@ -37,12 +40,24 @@ fn move_to(k: &mut EntityKind, c: &Call<'_>, used: &mut Used<'_>) {
     };
     let (x, y) = (c.num("positionX"), c.num("positionY"));
     if x.is_none() && y.is_none() {
-        return;
+        return move_z(k, c, used);
     }
     let to = Vec2::new(x.unwrap_or(at.x), y.unwrap_or(at.y));
     k.transform(&cadcraft_geom::Mat3::translate(to - at));
     used.extend(x.map(|_| "positionX"));
     used.extend(y.map(|_| "positionY"));
+    move_z(k, c, used);
+}
+
+/// Position Z of a block reference or point (attributes keep their own elevation).
+fn move_z(k: &mut EntityKind, c: &Call<'_>, used: &mut Used<'_>) {
+    let Some(z) = c.num("positionZ") else { return };
+    match k {
+        EntityKind::Insert(i) => i.insert.z = z,
+        EntityKind::Point(pt) => pt.p.z = z,
+        _ => return,
+    }
+    used.insert("positionZ");
 }
 
 fn set_xy(p: &mut Vec3, v: &Value) {
@@ -401,7 +416,13 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                         pl.plinegen = on;
                         used.insert("plinegen");
                     }
+                    if let Some(z) = c.num("elevation") {
+                        pl.elevation = z;
+                        used.insert("elevation");
+                    }
+                    polyline_vertex(pl, &c, &mut used);
                 }
+                EntityKind::Ellipse(el) => ellipse(el, &c, &mut used),
                 EntityKind::Insert(i) => insert(i, &c, &mut used),
                 EntityKind::Dimension(dm) => dimension(dm, &c, h, &mut used),
                 EntityKind::Hatch(ha) => hatch(ha, &c, &mut used),
@@ -487,10 +508,8 @@ fn line(l: &mut Line, c: &Call<'_>, used: &mut Used<'_>) {
         used.insert("end");
     }
     // One coordinate at a time, the other kept (the palette's Start X … End Y rows).
-    set_axis(&mut l.a, c.num("startX"), true, "startX", used);
-    set_axis(&mut l.a, c.num("startY"), false, "startY", used);
-    set_axis(&mut l.b, c.num("endX"), true, "endX", used);
-    set_axis(&mut l.b, c.num("endY"), false, "endY", used);
+    set_coords(&mut l.a, c, ["startX", "startY", "startZ"], used);
+    set_coords(&mut l.b, c, ["endX", "endY", "endZ"], used);
     // Length / angle keep the start point and move the end point.
     let (a, b) = (l.a.xy(), l.b.xy());
     let length = c.num("length").filter(|x| *x > 0.0 && *x < 1e15);
@@ -516,8 +535,7 @@ fn circle(ci: &mut Circle, c: &Call<'_>, used: &mut Used<'_>) {
         set_xy(&mut ci.center, v);
         used.insert("center");
     }
-    set_axis(&mut ci.center, c.num("centerX"), true, "centerX", used);
-    set_axis(&mut ci.center, c.num("centerY"), false, "centerY", used);
+    set_coords(&mut ci.center, c, ["centerX", "centerY", "centerZ"], used);
     if let Some(r) = c.num("radius").filter(|r| *r > 0.0) {
         ci.radius = r;
         used.insert("radius");
@@ -541,8 +559,7 @@ fn arc(a: &mut Arc, c: &Call<'_>, used: &mut Used<'_>) {
         set_xy(&mut a.center, v);
         used.insert("center");
     }
-    set_axis(&mut a.center, c.num("centerX"), true, "centerX", used);
-    set_axis(&mut a.center, c.num("centerY"), false, "centerY", used);
+    set_coords(&mut a.center, c, ["centerX", "centerY", "centerZ"], used);
     if let Some(r) = c.num("radius").filter(|r| *r > 0.0) {
         a.radius = r;
         used.insert("radius");
@@ -698,6 +715,55 @@ fn mtext_spacing(t: &mut MText, c: &Call<'_>, used: &mut Used<'_>) {
     }
 }
 
+/// The palette's Vertex X / Vertex Y: `vertex` (1 for the first) names the vertex moved.
+fn polyline_vertex(pl: &mut cadcraft_doc::LwPolyline, c: &Call<'_>, used: &mut Used<'_>) {
+    let (x, y) = (c.num("vertexX"), c.num("vertexY"));
+    if x.is_none() && y.is_none() {
+        return;
+    }
+    let Some(v) = c.p.get("vertex").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()).and_then(|n| n.checked_sub(1)).and_then(|i| pl.vertices.get_mut(i))
+    else {
+        return;
+    };
+    if let Some(x) = x {
+        v.p.x = x;
+        used.insert("vertexX");
+    }
+    if let Some(y) = y {
+        v.p.y = y;
+        used.insert("vertexY");
+    }
+    used.insert("vertex");
+}
+
+/// An ellipse's centre, radii and radius ratio, as AutoCAD's palette edits them: the major
+/// axis keeps its direction.
+fn ellipse(el: &mut cadcraft_doc::Ellipse, c: &Call<'_>, used: &mut Used<'_>) {
+    set_coords(&mut el.center, c, ["centerX", "centerY", "centerZ"], used);
+    let major = el.major.xy().len();
+    if let Some(r) = c.num("majorRadius").filter(|r| *r > 0.0 && *r < 1e15)
+        && major > 0.0
+    {
+        let minor = major * el.ratio;
+        el.major = Vec3::new(el.major.x * r / major, el.major.y * r / major, el.major.z);
+        // The minor radius stays, capped so the major axis stays the longer one.
+        el.ratio = (minor / r).clamp(1e-6, 1.0);
+        used.insert("majorRadius");
+    }
+    let major = el.major.xy().len();
+    if let Some(r) = c.num("minorRadius").filter(|r| *r > 0.0)
+        && major > 0.0
+        && r <= major
+    {
+        el.ratio = r / major;
+        used.insert("minorRadius");
+    }
+    if let Some(k) = c.num("ratio").filter(|k| *k > 0.0 && *k <= 1.0) {
+        el.ratio = k;
+        used.insert("ratio");
+    }
+}
+
 fn insert(i: &mut Insert, c: &Call<'_>, used: &mut Used<'_>) {
     if let Some(x) = c.num("rotation") {
         let turn = x.to_radians() - i.rotation;
@@ -736,6 +802,36 @@ fn insert(i: &mut Insert, c: &Call<'_>, used: &mut Used<'_>) {
         }
         i.scale = Vec3::new(x, x, x);
         used.insert("scale");
+    }
+    // Scale X / Y / Z one at a time: the attached text stretches with the reference along the
+    // block's own axes, about its insertion point.
+    let factors = [("scaleX", i.scale.x), ("scaleY", i.scale.y), ("scaleZ", i.scale.z)].map(|(k, old)| (k, old, c.num(k).filter(|v| *v != 0.0 && v.is_finite())));
+    if factors.iter().any(|(_, _, v)| v.is_some()) {
+        let f = |n: usize| factors[n].2.map_or(1.0, |v| if factors[n].1 != 0.0 { v / factors[n].1 } else { 1.0 });
+        let base = i.insert.xy();
+        let m = cadcraft_geom::Mat3::rotate_about(base, i.rotation)
+            .then_before(cadcraft_geom::Mat3::translate(base))
+            .then_before(cadcraft_geom::Mat3::scale(f(0), f(1)))
+            .then_before(cadcraft_geom::Mat3::translate(-base))
+            .then_before(cadcraft_geom::Mat3::rotate_about(base, -i.rotation));
+        for a in &mut i.attribs {
+            let mut k = EntityKind::Text(a.text.clone());
+            k.transform(&m);
+            if let EntityKind::Text(t) = k {
+                a.text = t;
+            }
+            a.transform_multiline(&m);
+        }
+        for (n, (k, _, v)) in factors.iter().enumerate() {
+            if let Some(v) = v {
+                match n {
+                    0 => i.scale.x = *v,
+                    1 => i.scale.y = *v,
+                    _ => i.scale.z = *v,
+                }
+                used.insert(*k);
+            }
+        }
     }
 }
 

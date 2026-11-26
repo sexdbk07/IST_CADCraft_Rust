@@ -298,3 +298,40 @@ fn a_block_reference_moves_with_its_attributes() {
         assert!((a - b - 30.0).abs() < 1e-9, "the attribute moved with the reference");
     }
 }
+
+#[test]
+fn ellipses_polyline_vertices_and_block_scales_are_editable() {
+    let mut s = Session::new();
+    s.execute("ellipse", &json!({ "center": [0, 0], "major": [10, 0], "ratio": 0.5 })).unwrap();
+    let el = last(&s);
+    let rows = describe(&mut s, json!({ "handles": [el] }));
+    assert_eq!(row(&rows, "Geometry", "majorRadius")["editable"], true);
+    s.execute("properties.set", &json!({ "handles": [el], "minorRadius": 2, "centerZ": 3 })).unwrap();
+    let rows = describe(&mut s, json!({ "handles": [el] }));
+    assert_eq!((num(&rows, "Geometry", "minorRadius"), num(&rows, "Geometry", "centerZ")), (2.0, 3.0));
+    // The major radius grows and the minor one stays.
+    s.execute("properties.set", &json!({ "handles": [el], "majorRadius": 20 })).unwrap();
+    let rows = describe(&mut s, json!({ "handles": [el] }));
+    assert!((num(&rows, "Geometry", "minorRadius") - 2.0).abs() < 1e-9 && num(&rows, "Geometry", "majorRadius") > 10.0);
+
+    s.execute("pline", &json!({ "vertices": [[0, 0], [4, 0], [4, 3]], "closed": false })).unwrap();
+    let pl = last(&s);
+    let before = describe(&mut s, json!({ "handles": [pl] }));
+    let r = s.execute("properties.set", &json!({ "handles": [pl], "vertex": 3, "vertexY": 9, "elevation": 1 })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let after = describe(&mut s, json!({ "handles": [pl] }));
+    assert!(num(&after, "Geometry", "length") > num(&before, "Geometry", "length"));
+    assert_eq!(num(&after, "Geometry", "elevation"), 1.0);
+    // A vertex the polyline doesn't have changes nothing.
+    let r = s.execute("properties.set", &json!({ "handles": [pl], "vertex": 9, "vertexX": 1 })).unwrap();
+    assert!(r["ignored"].as_array().unwrap().iter().any(|k| k == "vertexX"), "{r}");
+
+    s.execute("line", &json!({ "points": [[0, 0], [1, 0]] })).unwrap();
+    let hs = vec![last(&s)];
+    s.execute("block", &json!({ "name": "B", "base": [0, 0], "handles": hs, "keep": "delete" })).unwrap();
+    s.execute("insert", &json!({ "name": "B", "at": [5, 5] })).unwrap();
+    let i = last(&s);
+    s.execute("properties.set", &json!({ "handles": [i], "scaleX": 2 })).unwrap();
+    let rows = describe(&mut s, json!({ "handles": [i] }));
+    assert_eq!((num(&rows, "Geometry", "scaleX"), num(&rows, "Geometry", "scaleY")), (2.0, 1.0));
+}
