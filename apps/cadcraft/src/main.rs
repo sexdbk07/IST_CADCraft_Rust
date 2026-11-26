@@ -679,6 +679,9 @@ fn main() -> eframe::Result {
             app.ui.show_toolsets = false;
             app.ui.show_palettes = false;
             app.ui.show_viewcube = false;
+            // File, Edit and View are in iStCAD's title bar; it has no menu bar row (MENUBAR 1
+            // brings CADCraft's back).
+            app.ui.in_window_menu = false;
             // iStCAD shows its grid from the start (GRID on).
             app.session.settings.gridmode = true;
             if surface.present_mode == eframe::wgpu::PresentMode::AutoNoVsync {

@@ -882,9 +882,14 @@ pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         row(ui, tabs_row, egui::Layout::left_to_right(egui::Align::Center), |ui| layout_tabs(app, ui));
         row(ui, toggles_row, egui::Layout::right_to_left(egui::Align::Center), |ui| drafting_toggles(app, ui));
-        row(ui, zoom_row, egui::Layout::right_to_left(egui::Align::Center), |ui| zoom_controls(app, ui, t));
-        row(ui, zoom_row, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        let zoom = row(ui, zoom_row, egui::Layout::right_to_left(egui::Align::Center), |ui| zoom_controls(app, ui, t));
+        // iStCAD's three view glyphs go left of the zoom controls, as many as fit beside them.
+        let glyphs = Rect::from_min_max(zoom_row.min, pos2((zoom.left() - 6.0).max(zoom_row.left()), zoom_row.bottom()));
+        row(ui, glyphs, egui::Layout::left_to_right(egui::Align::Center), |ui| {
             for glyph in ["▧", "▣", "⚙"] {
+                if ui.available_width() < 20.0 {
+                    break;
+                }
                 ui.label(RichText::new(glyph).size(13.0).color(t.canvas_ink));
                 ui.add_space(12.0);
             }
@@ -893,11 +898,14 @@ pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
 }
 
 /// Lay out `add` inside `rect` with `layout`.
-fn row(ui: &mut egui::Ui, rect: Rect, layout: egui::Layout, add: impl FnOnce(&mut egui::Ui)) {
+/// Lay out `add` in `rect`; gives the area it used.
+fn row(ui: &mut egui::Ui, rect: Rect, layout: egui::Layout, add: impl FnOnce(&mut egui::Ui)) -> Rect {
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(layout), |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         add(ui);
-    });
+        ui.min_rect()
+    })
+    .inner
 }
 
 /// Draws one run of text after another on the command line.

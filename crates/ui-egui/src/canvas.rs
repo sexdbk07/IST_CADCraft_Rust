@@ -591,7 +591,10 @@ fn paint_pointer_overlay(frame: &mut CanvasPaint<'_>, paper_rect: Option<Rect>, 
     if app.ui.show_viewcube && sheet.is_none() {
         draw_viewcube(app, ui, rect);
     }
-    viewport_label(painter, rect);
+    // iStCAD's drawing area has no viewport label.
+    if !app.istcad.enabled {
+        viewport_label(painter, rect);
+    }
     // Typing and Escape reach the command line even when its overlay is hidden, unless the
     // inline constraint editor already handled this frame's keys (Enter would otherwise repeat
     // `last_command`, e.g. immediately undoing the edit after Cmd+Z).

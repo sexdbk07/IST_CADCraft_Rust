@@ -32,6 +32,7 @@ fn istcad_app() -> CadApp {
     app.ui.show_toolsets = false;
     app.ui.show_palettes = false;
     app.ui.show_viewcube = false;
+    app.ui.in_window_menu = false;
     app.session.settings.gridmode = true;
     let _ = app.run("ui.sample", json!({}));
     app
@@ -61,6 +62,10 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
     let shown = painted(&h);
     for label in ["Text Style", "Dim Style", "Layer", "Command:", "Model"] {
         assert!(shown.iter().any(|t| t.contains(label)), "the iStCAD window doesn't show {label:?}: {shown:?}");
+    }
+    // iStCAD has neither CADCraft's menu bar row nor its viewport label.
+    for absent in ["Dimension", "Modify", "2D Wireframe"] {
+        assert!(!shown.iter().any(|t| t.contains(absent)), "the iStCAD window shows {absent:?}");
     }
     save(&mut h, "01-start");
 

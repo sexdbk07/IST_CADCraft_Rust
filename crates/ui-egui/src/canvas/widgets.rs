@@ -30,7 +30,9 @@ pub(super) fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_e
         if let Some(list) = &app.canvas.list {
             draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
         }
-        viewport_label(&p, *r);
+        if !app.istcad.enabled {
+            viewport_label(&p, *r);
+        }
     }
     let p = ui.painter();
     for (r, tile) in tiles {
