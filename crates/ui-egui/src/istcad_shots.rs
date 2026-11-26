@@ -63,10 +63,11 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
     for label in ["Text Style", "Dim Style", "Layer", "Command:", "Model"] {
         assert!(shown.iter().any(|t| t.contains(label)), "the iStCAD window doesn't show {label:?}: {shown:?}");
     }
-    // iStCAD has neither CADCraft's menu bar row nor its viewport label.
-    for absent in ["Dimension", "Modify", "2D Wireframe"] {
-        assert!(!shown.iter().any(|t| t.contains(absent)), "the iStCAD window shows {absent:?}");
+    // CADCraft's menus are in the title bar, once: no second menu row. No viewport label.
+    for menu in ["Insert", "Draw", "Dimension", "Modify", "Window", "Help"] {
+        assert_eq!(shown.iter().filter(|t| t.as_str() == menu).count(), 1, "{menu} in {shown:?}");
     }
+    assert!(!shown.iter().any(|t| t.contains("2D Wireframe")), "the iStCAD window shows a viewport label");
     save(&mut h, "01-start");
 
     // Ctrl+1 with everything selected: the Properties palette on the right.

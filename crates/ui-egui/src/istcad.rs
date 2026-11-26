@@ -290,23 +290,31 @@ pub fn title_bar(app: &mut CadApp, ui: &mut egui::Ui) {
         if app.istcad.custom_frame || app.integrated_titlebar {
             craft_window::title_bar::empty_area(ui, r);
         }
-        paint_title(ui, r, t);
         sync_caption(app, ui.ctx());
+        // Window buttons and search on the right, then the left controls with the menus up to
+        // them; the title goes centred in the gap between (left of centre when the menus are wide).
+        let right = Rect::from_min_max(pos2(r.center().x, r.top()), pos2(r.right() - 8.0, r.bottom()));
+        let right_used = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)), |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                if app.istcad.custom_frame {
+                    window_buttons(ui);
+                }
+                search_box(app, ui, t);
+                ui.min_rect()
+            })
+            .inner;
         // macOS draws its traffic lights at the top left of the window.
         let inset = if app.integrated_titlebar { 84.0 } else { 12.0 };
-        let left = Rect::from_min_max(pos2(r.left() + inset, r.top()), pos2(r.center().x - 90.0, r.bottom()));
-        ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.horizontal_centered(|ui| title_left_controls(app, ui, t));
-        });
-        let right = Rect::from_min_max(pos2(r.center().x + 90.0, r.top()), pos2(r.right() - 8.0, r.bottom()));
-        ui.scope_builder(egui::UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)), |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            if app.istcad.custom_frame {
-                window_buttons(ui);
-            }
-            search_box(app, ui, t);
-        });
+        let left = Rect::from_min_max(pos2(r.left() + inset, r.top()), pos2(right_used.left() - 12.0, r.bottom()));
+        let left_used = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.horizontal_centered(|ui| title_left_controls(app, ui, t));
+                ui.min_rect()
+            })
+            .inner;
+        paint_title(ui, Rect::from_min_max(pos2(left_used.right() + 12.0, r.top()), pos2(right_used.left() - 12.0, r.bottom())), r, t);
     });
 }
 
@@ -325,13 +333,18 @@ fn paint_logo(p: &egui::Painter, rect: Rect, t: Tokens) {
     p.circle_filled(at(26.3, 5.7), 1.7 * s, t.icon_point);
 }
 
-/// "IST_CADCraft" (14 pt) and " v1.0.0" (9 pt, `#A7AEB8`), centred.
-fn paint_title(ui: &egui::Ui, r: Rect, t: Tokens) {
+/// "IST_CADCraft" (14 pt) and " v1.0.0" (9 pt, `#A7AEB8`): centred on the bar `bar`, kept
+/// within `gap` (between the menus and the search box); left out when the gap is too narrow.
+fn paint_title(ui: &egui::Ui, gap: Rect, bar: Rect, t: Tokens) {
     let p = ui.painter();
     let name = p.layout_no_wrap(PRODUCT.to_string(), FontId::proportional(14.0), t.text);
     let ver = p.layout_no_wrap(format!(" v{VERSION}"), FontId::proportional(9.0), t.canvas_ink);
     let (nw, vw, nh) = (name.size().x, ver.size().x, name.size().y);
-    let x = r.center().x - (nw + vw) / 2.0;
+    if gap.width() < nw + vw {
+        return;
+    }
+    let r = bar;
+    let x = (r.center().x - (nw + vw) / 2.0).clamp(gap.left(), gap.right() - nw - vw);
     let y = r.center().y - nh / 2.0;
     p.galley(pos2(x, y), name, t.text);
     p.galley(pos2(x + nw, y + 4.0), ver, t.canvas_ink);
@@ -377,9 +390,12 @@ fn title_left_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     }
     ui.add_space(5.0);
     rule(ui, 22.0, 0.0);
-    for menu in ["File", "Edit", "View"] {
-        menu_button(app, ui, menu);
-    }
+    // CADCraft's menus (File, Edit, View, Insert, Format, Tools, Draw, Dimension, Modify,
+    // Window, Help) sit here, where iStCAD has its File / Edit / View, so there is no second row.
+    crate::menus::menu_row(app, ui, |ui, name| {
+        let w = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(13.0), Color32::WHITE).size().x;
+        text_button(ui, vec2((w + 16.0).max(36.0), 28.0), name, 13.0, &format!("{name} menu"))
+    });
     if let Some(cmd) = run {
         if cmd == "new" {
             app.ui.start_tab = false;
@@ -388,26 +404,8 @@ fn title_left_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     }
 }
 
-/// One of the File / Edit / View menus (60 × 28): the registry's commands placed directly under
-/// that menu, in registry order, plus the interface's own commands placed there.
-fn menu_button(app: &mut CadApp, ui: &mut egui::Ui, menu: &str) {
-    let resp = text_button(ui, vec2(60.0, 28.0), crate::i18n::t(menu), 13.0, &format!("{menu} menu"));
-    let mut chosen = None;
-    egui::Popup::menu(&resp).show(|ui| {
-        ui.set_min_width(220.0);
-        for (id, label) in menu_entries(menu) {
-            if ui.button(crate::i18n::t(label)).clicked() {
-                chosen = Some(id);
-                ui.close();
-            }
-        }
-    });
-    if let Some(id) = chosen {
-        app.start(id);
-    }
-}
-
 /// `(command, label)` for every command one level under `menu`.
+#[cfg(test)]
 fn menu_entries(menu: &str) -> Vec<(&'static str, &'static str)> {
     let mut out: Vec<(&'static str, &'static str)> = cadcraft_engine::cmd::command_specs()
         .iter()

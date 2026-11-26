@@ -840,6 +840,25 @@ pub fn menu_bar(app: &mut CadApp, ui: &mut egui::Ui) {
     }
 }
 
+/// The menu bar's menus drawn by `title` as buttons in a row of another bar (the iStCAD title
+/// bar): the same tree, menus and switching on hover as [`menu_bar`].
+pub(crate) fn menu_row(app: &mut CadApp, ui: &mut egui::Ui, mut title: impl FnMut(&mut egui::Ui, &str) -> egui::Response) {
+    let tree = tree(app);
+    let mut clicked = None;
+    let titles: Vec<egui::Response> = tree.iter().map(|(name, _)| title(ui, crate::i18n::menu(name))).collect();
+    switch_on_hover(ui.ctx(), &titles);
+    for ((_, entries), t) in tree.iter().zip(&titles) {
+        egui::Popup::menu(t).show(|ui| {
+            for e in entries {
+                entry_ui(ui, e, &mut clicked);
+            }
+        });
+    }
+    if let Some(id) = clicked {
+        activate(app, &id);
+    }
+}
+
 /// While one menu of the bar is open, pointing at another title opens that menu instead.
 fn switch_on_hover(ctx: &egui::Context, titles: &[egui::Response]) {
     let is_open = |title: &egui::Response| egui::Popup::is_id_open(ctx, egui::Popup::default_response_id(title));
