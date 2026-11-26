@@ -48,7 +48,7 @@ jobs:
         run: |
           set -e
           mkdir -p /tmp/bin && cp target/release/cadcraft-cli /tmp/bin/
-          if [[ "$GITHUB_REF_NAME" != exp/profile* ]]; then strip /tmp/bin/cadcraft-cli || true; fi
+          if [[ "$GITHUB_REF_NAME" == exp/profile* ]]; then strip --strip-debug /tmp/bin/cadcraft-cli; ls -la /tmp/bin; else strip /tmp/bin/cadcraft-cli || true; fi
           cp Cargo.lock /tmp/bin/Cargo.lock
           cd /tmp/bin
           echo "${GITHUB_SHA}" > SOURCE_COMMIT
