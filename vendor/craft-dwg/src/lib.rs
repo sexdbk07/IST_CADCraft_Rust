@@ -1035,6 +1035,11 @@ mod native {
                 None => std::borrow::Cow::Borrowed(std::str::from_utf8(dxf).ok()?.as_bytes()),
             }
         };
+        // Read as 2007 or later, the file's text is UTF-8: the R2000 `\U+XXXX` escapes become the
+        // characters. acadrust decodes them in some values but not in table record names (a
+        // layer or text style named in Vietnamese reached the DWG as `K\U+00EDCH TH\U+01B0...`).
+        let text: std::borrow::Cow<'_, [u8]> =
+            if kept >= acadrust::DxfVersion::AC1021 && text.windows(3).any(|w| w == b"\\U+") { std::borrow::Cow::Owned(decode_unicode_escapes(&text)) } else { text };
         let (at, value) = header_value(&text, b"$ACADVER")?;
         let code = kept.to_string();
         let mut out = Vec::with_capacity(text.len().saturating_add(code.len()));
@@ -1042,6 +1047,43 @@ mod native {
         out.extend_from_slice(code.as_bytes());
         out.extend_from_slice(text.get(at.checked_add(value.len())?..)?);
         Some(out)
+    }
+
+    /// `text` with each `\U+XXXX` escape (a UTF-16 unit; a surrogate pair takes two) replaced by
+    /// the UTF-8 of its character. An escape that names no character is left as it is.
+    pub(super) fn decode_unicode_escapes(text: &[u8]) -> Vec<u8> {
+        let unit_at = |i: usize| -> Option<u32> {
+            if text.get(i..i.checked_add(3)?)? != b"\\U+" {
+                return None;
+            }
+            let digits = text.get(i + 3..i.checked_add(7)?)?;
+            if !digits.iter().all(u8::is_ascii_hexdigit) {
+                return None;
+            }
+            u32::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()
+        };
+        let mut out = Vec::with_capacity(text.len());
+        let mut i = 0;
+        while let Some(&b) = text.get(i) {
+            if b == b'\\'
+                && let Some(unit) = unit_at(i)
+            {
+                let pair = if (0xD800..0xDC00).contains(&unit) { unit_at(i + 7).filter(|lo| (0xDC00..0xE000).contains(lo)) } else { None };
+                let (c, used) = match pair {
+                    Some(lo) => (char::from_u32(0x10000 + ((unit - 0xD800) << 10) + (lo - 0xDC00)), 14),
+                    None => (char::from_u32(unit), 7),
+                };
+                if let Some(c) = c {
+                    let mut buf = [0u8; 4];
+                    out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                    i += used;
+                    continue;
+                }
+            }
+            out.push(b);
+            i += 1;
+        }
+        out
     }
 
     /// The format (group 4) of each FIELD record in an ASCII DXF, by handle. acadrust 0.6.6 reads
@@ -2047,13 +2089,15 @@ mod tests {
         dxf
     }
 
-    /// The kept version replaces only the `$ACADVER` value; everything else stays byte for byte.
+    /// The kept version replaces the `$ACADVER` value, and the R2000 `\U+` escapes become the
+    /// characters (read as 2007 or later the text is UTF-8); everything else stays byte for byte.
     #[cfg(not(no_dwg_bridge))]
     #[test]
     fn declare_version_changes_only_acadver() {
-        let dxf = r2000(b"A\\U+00E7\\U+00E3o");
+        let dxf = r2000(b"A\\U+00E7\\U+00E3o \\U+D83D\\U+DE00 \\U+ZZZZ");
         let out = native::declare_version(&dxf, acadrust::DxfVersion::AC1032).unwrap();
-        assert_eq!(String::from_utf8(out).unwrap(), String::from_utf8(dxf).unwrap().replacen("AC1015", "AC1032", 1));
+        let expected = String::from_utf8(dxf).unwrap().replacen("AC1015", "AC1032", 1).replace("A\\U+00E7\\U+00E3o \\U+D83D\\U+DE00", "A\u{e7}\u{e3}o \u{1f600}");
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
     }
 
     /// A kept version not newer than the declared one, a binary DXF and a DXF without `$ACADVER`
