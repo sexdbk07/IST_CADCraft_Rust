@@ -1032,6 +1032,10 @@ mod native {
     /// would lose its format; a field carried over from a 2007+ file has none and keeps its own
     /// `value.format`.
     fn legacy_field_formats(dxf: &[u8]) -> Vec<(acadrust::Handle, String)> {
+        // Most drawings have no FIELD record: a byte search skips decoding every group.
+        if !dxf.windows(5).any(|w| w.eq_ignore_ascii_case(b"FIELD")) {
+            return Vec::new();
+        }
         let Some(pairs) = super::proxy_transport::text_pairs(dxf) else { return Vec::new() };
         let mut formats = Vec::new();
         let (mut in_field, mut handle, mut format, mut past) = (false, None, None, false);

@@ -166,17 +166,16 @@ fn tags_kept(d: &Drawing, version: Version) -> (Vec<Tag>, std::collections::Hash
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
 /// version's (MULTILEADER from 2007).
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> (String, craft_dwg::Unwritten) {
-    let (mut tags, kept) = sections::tags_kept_for(d, Version::R2000, dwg, false, true);
     let mut unwritten = craft_dwg::Unwritten::new();
-    if dwg == Version::R2007 {
-        let omitted = legacy_visualstyles_kept(d, &kept);
-        if omitted != 0 {
-            let mut source = d.clone();
-            std::sync::Arc::make_mut(&mut source.foreign).objects.retain(|object| !legacy_visual_style(object));
-            tags = tags_for(&source, Version::R2000, dwg, false);
-            unwritten.insert("VISUALSTYLE".into(), omitted);
-        }
-    }
+    let omitted = if dwg == Version::R2007 && d.foreign.objects.iter().any(legacy_visual_style) { legacy_visualstyles_written(d, dwg) } else { 0 };
+    let mut tags = if omitted != 0 {
+        let mut source = d.clone();
+        std::sync::Arc::make_mut(&mut source.foreign).objects.retain(|object| !legacy_visual_style(object));
+        unwritten.insert("VISUALSTYLE".into(), omitted);
+        tags_for(&source, Version::R2000, dwg, false)
+    } else {
+        sections::tags_kept_for(d, Version::R2000, dwg, false, true).0
+    };
     bridge_markers(&mut tags);
     (craft_dxf::write_ascii(&tags), unwritten)
 }
@@ -186,13 +185,35 @@ pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> (String, craft_dwg::Unwri
 pub fn dwg_compat_lost(d: &Drawing, version: Version) -> craft_dwg::Unwritten {
     let mut lost = craft_dwg::Unwritten::new();
     if version == Version::R2007 && d.foreign.objects.iter().any(legacy_visual_style) {
-        let (_, kept) = sections::tags_kept_for(d, Version::R2000, version, false, true);
-        let omitted = legacy_visualstyles_kept(d, &kept);
+        let omitted = legacy_visualstyles_written(d, version);
         if omitted != 0 {
             lost.insert("VISUALSTYLE".into(), omitted);
         }
     }
     lost
+}
+
+/// The last drawing [`legacy_visualstyles_written`] counted, the version, and the count.
+static WRITTEN_STYLES: std::sync::Mutex<Option<(Drawing, Version, usize)>> = std::sync::Mutex::new(None);
+
+/// How many of `d`'s legacy visual styles a `version` file would hold: those a full write keeps.
+/// That takes a whole write of the drawing, and a save asks twice (the loss report, then the
+/// DWG bridge), so the count of the last drawing asked about is kept and reused while the drawing
+/// is equal to it.
+fn legacy_visualstyles_written(d: &Drawing, version: Version) -> usize {
+    if let Ok(memo) = WRITTEN_STYLES.lock()
+        && let Some((drawing, v, n)) = memo.as_ref()
+        && *v == version
+        && drawing == d
+    {
+        return *n;
+    }
+    let (_, kept) = sections::tags_kept_for(d, Version::R2000, version, false, true);
+    let n = legacy_visualstyles_kept(d, &kept);
+    if let Ok(mut memo) = WRITTEN_STYLES.lock() {
+        *memo = Some((d.clone(), version, n));
+    }
+    n
 }
 
 fn legacy_visualstyles_kept(d: &Drawing, kept: &HashSet<cadcraft_doc::Handle>) -> usize {

@@ -1510,10 +1510,23 @@ fn plan_unknown(
         }
     }
     let ents_end = recs.iter().find(|r| r.sec == "ENTITIES" && r.kind == "ENDSEC").map(|r| r.start);
-    let endblk = |name: &str| {
-        let i = recs.iter().position(|r| r.sec == "BLOCKS" && r.kind == "BLOCK" && val(body(r), 2).is_some_and(|n| up(&n) == up(name)))?;
-        recs.iter().skip(i).find(|r| r.kind == "ENDBLK").map(|r| r.start)
-    };
+    // Where each block's contents end: its first BLOCK record's next ENDBLK, by upper-case name.
+    // Looked up once per block of the drawing, so found in one pass rather than a search of every
+    // record per block (thousands of anonymous blocks made saving quadratic).
+    let mut ends: HashMap<String, usize> = HashMap::new();
+    let mut open: Vec<String> = Vec::new();
+    for r in recs {
+        if r.sec == "BLOCKS" && r.kind == "BLOCK" {
+            if let Some(n) = val(body(r), 2) {
+                open.push(up(&n));
+            }
+        } else if r.kind == "ENDBLK" {
+            for n in open.drain(..) {
+                ends.entry(n).or_insert(r.start);
+            }
+        }
+    }
+    let endblk = |name: &str| ends.get(&up(name)).copied();
     let br = |name: &str| roles.get(&("BLOCK_RECORD".to_string(), up(name))).cloned();
     let first_at = |s: &cadcraft_doc::EntityStore| s.iter().find_map(|e| at.get(&e.handle.hex()).copied());
     // The LAYER table as written: proxy graphics name layers by their index in it (#3094).
