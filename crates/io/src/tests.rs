@@ -4767,3 +4767,97 @@ fn a_layer_state_saved_before_masks_restores_everything() {
     let got: Vec<(&str, u32, &str, &str)> = states.iter().map(|s| (s.name.as_str(), s.mask, s.current.as_str(), s.description.as_str())).collect();
     assert_eq!(got, [("S", LayerState::ALL, "", "")]);
 }
+
+/// A dimension kept as read (it still names its `*D` block) keeps its file's text position and
+/// measurement through a save: recomputing them moved the text of thousands of dimensions in real
+/// AutoCAD drawings and lost DIMLFAC-scaled measurements.
+#[test]
+fn kept_dimension_keeps_its_text_position_and_measurement() {
+    let mut d = Drawing::new_metric();
+    let mut b = Block::new("*D7");
+    b.entities.push(Entity::new(Handle(0x60), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(10.0, 0.0, 0.0) })));
+    d.blocks.insert("*D7".into(), std::sync::Arc::new(b));
+    // A text position no layout of CADCraft's would give, and a measurement twice the geometry
+    // (as a DIMLFAC of 2 gives).
+    let text_mid = Vec3::new(3.25, 7.5, 0.0);
+    d.add(
+        &Space::Model,
+        Common::default(),
+        EntityKind::Dimension(Dimension {
+            kind: DimKind::Linear { rotation: 0.0 },
+            defpt: Vec3::new(0.0, -1.0, 0.0),
+            text_mid,
+            p13: Vec3::ZERO,
+            p14: Vec3::new(10.0, 0.0, 0.0),
+            p15: Vec3::ZERO,
+            p16: Vec3::ZERO,
+            text: String::new(),
+            style: "Standard".into(),
+            measurement: 20.0,
+            text_rotation: 0.0,
+            user_text_pos: false,
+            block: Some("*D7".into()),
+            overrides: Default::default(),
+            assoc: Vec::new(),
+            marks: Default::default(),
+            insertion_point: Vec3::ZERO,
+        }),
+    )
+    .unwrap();
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    let dm = back
+        .model
+        .iter()
+        .find_map(|e| match &e.kind {
+            EntityKind::Dimension(dm) => Some(dm.clone()),
+            _ => None,
+        })
+        .expect("the dimension is saved");
+    assert!((dm.text_mid - text_mid).len() < 1e-9, "{:?}", dm.text_mid);
+    assert!((dm.measurement - 20.0).abs() < 1e-9, "{}", dm.measurement);
+}
+
+/// An attribute that names layer 0 itself stays on layer 0 when its reference is on another
+/// layer; only an attribute with no layer of its own, defined on layer 0, takes the reference's.
+#[test]
+fn attribute_on_layer_zero_keeps_its_layer() {
+    let mut d = Drawing::new_metric();
+    d.layers.push(Layer { name: "Walls".into(), ..Layer::default() });
+    let def = |tag: &str| Attrib {
+        tag: tag.into(),
+        text: intl_text("x"),
+        invisible: false,
+        constant: false,
+        prompt: String::new(),
+        props: Default::default(),
+        multiline: None,
+        modes: Default::default(),
+    };
+    let mut b = Block::new("TAG");
+    b.entities.push(Entity::new(Handle(0x50), EntityKind::AttDef(def("OWN"))));
+    b.entities.push(Entity::new(Handle(0x51), EntityKind::AttDef(def("INHERITED"))));
+    d.blocks.insert("TAG".into(), std::sync::Arc::new(b));
+    let own = Attrib { props: AttribProps { layer: Some("0".into()), ..Default::default() }, ..def("OWN") };
+    d.add(
+        &Space::Model,
+        Common { layer: "Walls".into(), ..Common::default() },
+        EntityKind::Insert(Insert {
+            block: "TAG".into(),
+            insert: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: vec![own, def("INHERITED")],
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+            clip: None,
+        }),
+    )
+    .unwrap();
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    let ins = first(&back, |k| if let EntityKind::Insert(i) = k { Some(i.clone()) } else { None });
+    let layer_of = |tag: &str| ins.attribs.iter().find(|a| a.tag == tag).map(|a| a.props.over(&Common { layer: "Walls".into(), ..Common::default() }).layer);
+    assert_eq!(layer_of("OWN").as_deref(), Some("0"));
+    assert_eq!(layer_of("INHERITED").as_deref(), Some("Walls"));
+}

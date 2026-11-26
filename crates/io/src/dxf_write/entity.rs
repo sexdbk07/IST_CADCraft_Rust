@@ -409,7 +409,12 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         w.p(10, dm.defpt);
         let style = d.dim_style(&dm.style).cloned().unwrap_or_default();
         let g = cadcraft_render::dimension_geometry(dm, &style, d.header.f64("DIMSCALE", 1.0));
-        w.p(11, if dm.user_text_pos { dm.text_mid } else { g.text_pos.to3(0.0) });
+        // A dimension kept as read (it still names its `*D` block: every edit and transform drops
+        // it) keeps the text position and measurement its file gave. Recomputing them moved the
+        // text of thousands of dimensions in real drawings and lost a DIMLFAC-scaled measurement
+        // (3000 written as 1500), since CADCraft's layout and overrides aren't AutoCAD's.
+        let kept = dm.block.is_some();
+        w.p(11, if dm.user_text_pos || kept { dm.text_mid } else { g.text_pos.to3(0.0) });
         // Group 12: a block read from a file keeps the dimension's moved-by offset (AutoCAD
         // draws the block translated by it); regenerated geometry already sits where the
         // definition points place it, so it writes no offset.
@@ -429,7 +434,7 @@ fn write_dimension_entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper
         };
         w.i(70, ty | 32 | if dm.user_text_pos { 128 } else { 0 });
         // The actual measurement (read-only in DXF): AutoLISP's entget shows it.
-        w.f(42, g.measurement);
+        w.f(42, if kept && dm.measurement.is_finite() && dm.measurement != 0.0 { dm.measurement } else { g.measurement });
         if !dm.text.is_empty() {
             w.s(1, crate::dxf_read::mtext_dxf::encode_line(&dm.text));
         }
