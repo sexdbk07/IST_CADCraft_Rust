@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "acadrust"
-version = "0.6.6"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8923c99ea1f151cb7fc17ce2fc14f8b1e330fa22611e535602d985c0cc3c89a2"
+checksum = "eb201e11e1c75584e4deefc2b30afb83e2f34d16338733439d38664cb9599929"
 dependencies = [
  "anyhow",
  "bitflags 2.13.2",
@@ -1252,7 +1252,6 @@ source = "git+https://github.com/storytold/craft-libs?rev=453b0da782ccef39be9a6d
 [[package]]
 name = "craft-dwg"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=453b0da782ccef39be9a6dac8d27c80b553ef1cc#453b0da782ccef39be9a6dac8d27c80b553ef1cc"
 dependencies = [
  "acadrust",
  "log",
