@@ -753,6 +753,25 @@ mod native {
     /// common dimension data), which acadrust keeps no copy of from DXF: it is set here as
     /// CADCraft's DXF writer always sets it (#1094). Bit 0, the opposite of group 70's bit 128,
     /// acadrust 0.6.6 reads and writes itself.
+    /// Decode `\U+XXXX` and `\M+` escapes left in multiline text. The bridge DXF is R2000, where
+    /// characters outside ASCII are written as those escapes; acadrust decodes them in a TEXT's
+    /// value but not in the 250-character chunks (group 3) of a long MTEXT, so such text reached
+    /// the DWG with the escapes spelled out (`TA\U+00DBI` for `TAÛI`). AutoCAD shows both the
+    /// same, but the text read back no longer matched the drawing.
+    fn mtext_escapes(doc: &mut acadrust::CadDocument) {
+        use acadrust::io::dxf::code_page::decode_legacy_escapes;
+        let escaped = |v: &str| v.contains("\\U+") || v.contains("\\M+");
+        if !doc.entities().any(|e| matches!(e, acadrust::entities::EntityType::MText(m) if escaped(&m.value))) {
+            return;
+        }
+        for e in doc.entities_mut() {
+            let acadrust::entities::EntityType::MText(m) = e else { continue };
+            if escaped(&m.value) {
+                m.value = decode_legacy_escapes(&m.value);
+            }
+        }
+    }
+
     fn dimension_flags(doc: &mut acadrust::CadDocument) {
         for e in doc.entities_mut() {
             let acadrust::entities::EntityType::Dimension(d) = e else { continue };
@@ -1332,6 +1351,7 @@ mod native {
             table_style_rows(&mut doc, true);
             field_formats(&mut doc, &legacy);
             dimension_flags(&mut doc);
+            mtext_escapes(&mut doc);
             let mut unwritten = drop_unwritable(&mut doc);
             for (kind, n) in proxies {
                 let total = unwritten.entry(kind).or_insert(0);

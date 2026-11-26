@@ -123,7 +123,8 @@ shared dependency. Their source and hashes are retained below; notices are in `N
 `vendor/craft-dwg/` is `crates/dwg` of [storytold/craft-libs](https://github.com/storytold/craft-libs)
 at 453b0da782ccef39be9a6dac8d27c80b553ef1cc (MIT OR Apache-2.0). Its `Cargo.toml` asks for
 acadrust 0.6.8 instead of craft-libs' pinned 0.6.6, and `proxy_transport::text_pairs` and
-`legacy_field_formats` skip decoding work values don't need (speed only). acadrust
+`legacy_field_formats` skip decoding work values don't need (speed only), and a fix-up decodes
+`\U+`/`\M+` escapes acadrust leaves in long MTEXT. acadrust
 (MPL-2.0, <https://github.com/hakanaktt/acadrust>) is used unmodified from crates.io.
 
 ## Vendored: craft-dxf
