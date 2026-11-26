@@ -264,7 +264,7 @@ fn istcad_properties_pick_a_point_for_coordinates() {
     let _ = h.state_mut().run("select", json!({ "handles": [c] }));
     let _ = h.state_mut().run("ui.istcad.properties", json!({ "on": true }));
     h.run_steps(4);
-    h.get_by_label("Pick point for Center X").click();
+    egui_kittest::kittest::Queryable::get_by_label(&h, "Pick point for Center X").click();
     h.run_steps(2);
     assert!(h.state().session.running.is_some(), "the command line asks for the point");
     h.state_mut().session.input(cadcraft_engine::Input::Point(cadcraft_geom::Vec2::new(123.0, 45.0))).unwrap();

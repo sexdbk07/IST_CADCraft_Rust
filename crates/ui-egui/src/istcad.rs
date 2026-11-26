@@ -1033,7 +1033,7 @@ pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
     let radius = egui::CornerRadius { nw: 0, sw: 0, ne: 3, se: 3 };
     let pinned = app.istcad.quick_pinned;
     let shell = &app.istcad;
-    egui::Area::new(egui::Id::new("ist_quick_bar")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("ist_quick_bar")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
         let t = Tokens::get();
         let (fill, edge) = if open { (ink::EDGE_BG, ink::EDGE_BORDER) } else { (t.control_hover, ink::CANVAS_EDGE) };
         let frame = egui::Frame::NONE.fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(radius).inner_margin(if open { egui::Margin::symmetric(3, 5) } else { egui::Margin::ZERO });
@@ -1278,7 +1278,7 @@ fn history_window(app: &CadApp, ctx: &egui::Context, at: egui::Pos2, width: f32,
     // iStCAD 1.0.233 `CommandExpandedPanel`: 137 high, the canvas's width, `#F2182226`, the
     // history in Consolas 12 `#DCE2EA`, selectable so Ctrl+C copies it.
     let radius = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
-    egui::Area::new(egui::Id::new("ist_cmd_history")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("ist_cmd_history")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         egui::Frame::NONE
             .fill(ink::HISTORY_BG)
             .stroke(Stroke::new(1.0, ink::CANVAS_EDGE))
@@ -1315,7 +1315,7 @@ fn autocomplete(app: &mut CadApp, ctx: &egui::Context, bottom_left: egui::Pos2) 
     const ROW: f32 = 20.0;
     let h = (sug.len() as f32 * ROW + 6.0).min(190.0);
     let mut run = None;
-    egui::Area::new(egui::Id::new("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(bottom_left - vec2(0.0, h + 2.0)).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(bottom_left - vec2(0.0, h + 2.0)).show(ctx, |ui| {
         egui::Frame::NONE.fill(ink::SUGGEST_BG).stroke(Stroke::new(1.0, ink::SUGGEST_EDGE)).corner_radius(3).inner_margin(egui::Margin::same(2)).show(ui, |ui| {
             let width = sug.iter().map(|s| ui.fonts_mut(|f| f.layout_no_wrap(s.display.clone(), FontId::proportional(10.0), Color32::WHITE).size().x)).fold(120.0_f32, f32::max);
             ui.set_width((width + 24.0).min(254.0));
