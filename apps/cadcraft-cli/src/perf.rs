@@ -95,6 +95,7 @@ fn perf_file(path: &std::path::Path, io: &mut Streams) -> Result {
     io.outln(format_args!("open {open_ms:.0} ms, {} entities, extents {:.1} x {:.1}", d.entity_count(), ext.width(), ext.height()));
     io.outln(format_args!("{:>8} {:>10} {:>10}", "zoom", "build ms", "prims"));
     let mut finest = Options::default();
+    let mut extents = Options::default();
     for k in 0..5 {
         let zoom = 4f64.powi(k);
         let h = size / zoom;
@@ -105,8 +106,34 @@ fn perf_file(path: &std::path::Path, io: &mut Streams) -> Result {
         let t = Instant::now();
         let n = build(d, space, &screen).prims.len();
         io.outln(format_args!("{:>7}x {:>10.1} {n:>10}", zoom, ms(t)));
+        if k == 0 {
+            extents = screen.clone();
+        }
         finest = screen;
     }
+    // An edit at zoom extents: the canvas builds the list again for the same view, and the chunk
+    // cache draws only the store chunk the edit copied.
+    let mut cache = cadcraft_engine::render::ChunkCache::default();
+    let t = Instant::now();
+    let _ = cache.build(d, space, &extents);
+    let first_ms = ms(t);
+    let mut edited = (**d).clone();
+    if let Some(h) = edited.model.iter().nth(edited.model.len() / 2).map(|e| e.handle) {
+        edited.model.modify(h, |e| e.common.visible = !e.common.visible);
+    }
+    let edited = std::sync::Arc::new(edited);
+    let t = Instant::now();
+    let cached = cache.build(&edited, space, &extents);
+    let edit_ms = ms(t);
+    let t = Instant::now();
+    let full = build(&edited, space, &extents);
+    let full_ms = ms(t);
+    let same = cached.prims == full.prims && cached.verts == full.verts && cached.tris == full.tris;
+    io.outln(format_args!(
+        "edit: {edit_ms:.1} ms with the chunk cache ({} of {} chunks drawn again; first build {first_ms:.1} ms), {full_ms:.1} ms full; same list: {same}",
+        cache.rebuilt,
+        cache.rebuilt + cache.reused,
+    ));
     // Plots: every pattern line, everywhere (last, so its large list doesn't weigh on the above).
     let t = Instant::now();
     let n = build(d, space, &Options { min_dash: 0.0, view: None, ..finest }).prims.len();

@@ -425,6 +425,7 @@ mod table;
 pub use table::{MAX_LAYOUT_CELLS, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_style_of};
 
 mod blocks;
+mod chunk_cache;
 mod dim_draw;
 mod display;
 mod draw;
@@ -433,6 +434,7 @@ mod props;
 mod text_entity;
 mod viewports;
 
+pub use chunk_cache::ChunkCache;
 pub use dim_draw::{dim_text, dimension_in};
 pub use display::{DImage, DPrim, DisplayList, Kind, MAX_TRANSPARENCY, NO_LAYER, PlotText, VIEWPORT_CONTENT, alpha};
 pub use pipeline::{Options, build, build_entities, build_plot};

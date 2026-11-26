@@ -1525,3 +1525,37 @@ fn objects_built_on_all_cores_stop_at_the_point_budget_and_say_so() {
     assert!(l.truncated);
     assert!(points(&l) > 0 && points(&l) <= 10_000, "{}", points(&l));
 }
+
+// The chunk cache must give the list a full build gives, redraw only the chunk an edit copied,
+// and start over when something every object draws with changes (here a layer's colour).
+#[test]
+fn chunk_cache_redraws_only_edited_chunks_and_matches_a_full_build() {
+    let mut d = Drawing::new_imperial();
+    for i in 0..3000 {
+        let y = f64::from(i);
+        d.add(&Space::Model, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, y, 0.0), b: Vec3::new(10.0, y, 0.0) }))
+            .unwrap();
+    }
+    let opts = Options { tolerance: 0.01, on_screen: true, ..Default::default() };
+    let same = |a: &DisplayList, b: &DisplayList| a.prims == b.prims && a.verts == b.verts && a.tris == b.tris;
+    let mut cache = ChunkCache::default();
+    let first = std::sync::Arc::new(d);
+    assert!(same(&cache.build(&first, &Space::Model, &opts), &build(&first, &Space::Model, &opts)));
+
+    let mut edited = (*first).clone();
+    let h = edited.model.iter().nth(1500).map(|e| e.handle).unwrap();
+    edited.model.modify(h, |e| e.common.color = Color::Index(1));
+    let edited = std::sync::Arc::new(edited);
+    let list = cache.build(&edited, &Space::Model, &opts);
+    assert!(same(&list, &build(&edited, &Space::Model, &opts)));
+    assert!(cache.reused > 0 && cache.rebuilt < cache.reused, "reused {} rebuilt {}", cache.reused, cache.rebuilt);
+
+    let mut recoloured = (*edited).clone();
+    if let Some(l) = recoloured.layers.iter_mut().find(|l| l.name == "0") {
+        l.color = Color::Index(3);
+    }
+    let recoloured = std::sync::Arc::new(recoloured);
+    let list = cache.build(&recoloured, &Space::Model, &opts);
+    assert!(same(&list, &build(&recoloured, &Space::Model, &opts)));
+    assert_eq!(cache.reused, 0);
+}

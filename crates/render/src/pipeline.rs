@@ -201,6 +201,34 @@ fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStor
     }
 }
 
+/// One chunk of model space built for the screen, as [`build_parallel`] builds a part: the
+/// block-expansion and point budgets are shared with the rest of the list.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn build_chunk(
+    d: &Drawing,
+    opts: &Options,
+    items: &[std::sync::Arc<Entity>],
+    budget: &std::sync::atomic::AtomicUsize,
+    points: &std::sync::atomic::AtomicUsize,
+    max_points: usize,
+) -> DisplayList {
+    let mut part = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting: false,
+        styles: None,
+        named: None,
+        shared_budget: Some(budget),
+        transparency: 0,
+        points,
+        max_points,
+    };
+    for e in items {
+        entity(&mut part, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
+    }
+    part.list
+}
+
 /// The plot style table a build draws with: the one in `opts`, else (on screen) the layout's
 /// when its page setup has "Display plot styles" on.
 pub(crate) fn style_table(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> Option<std::sync::Arc<cadcraft_doc::PlotStyleTable>> {

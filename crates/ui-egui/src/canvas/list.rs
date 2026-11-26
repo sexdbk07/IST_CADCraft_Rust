@@ -76,6 +76,7 @@ pub(super) fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], c
     if app.canvas.font_generation != fonts {
         app.canvas.font_generation = fonts;
         app.canvas.list = None;
+        app.canvas.chunks.clear();
         app.canvas.job = None;
         // The model space seen through a layout's active viewport is drawn apart: rebuilt too.
         app.canvas.vp.key = None;
@@ -172,7 +173,8 @@ pub(super) fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], c
         }
     }
     let space = st.space.clone();
-    app.canvas.list = Some(cadcraft_render::build(&st.doc, &space, &opts));
+    // An edit changes a few store chunks: only those are drawn again.
+    app.canvas.list = Some(app.canvas.chunks.build(&st.doc, &space, &opts));
     app.canvas.key = key;
     app.canvas.window = opts.view;
     app.canvas.list_gen = app.canvas.list_gen.wrapping_add(1);

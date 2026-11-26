@@ -41,6 +41,8 @@ jobs:
         run: cargo test --locked -p cadcraft-ui-egui --lib -- istcad theme lasso
       - name: IO unit tests (DXF/DWG text and attributes)
         run: cargo test --locked -p cadcraft-io --lib -- attribute kept_dimension
+      - name: Render unit tests (display-list chunk cache)
+        run: cargo test --locked -p cadcraft-render --lib -- chunk_cache
 
   windows:
     name: Build (Windows)

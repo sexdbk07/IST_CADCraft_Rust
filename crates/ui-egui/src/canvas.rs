@@ -106,6 +106,9 @@ pub struct CanvasState {
     /// The font set the list was drawn with ([`cadcraft_fonts::ttf::generation`] and
     /// [`cadcraft_fonts::shx::generation`]): a new font folder redraws the text.
     font_generation: u64,
+    /// The parts of the last model-space list by store chunk: a build after an edit redraws only
+    /// the chunks the edit changed ([`cadcraft_render::ChunkCache`]).
+    chunks: cadcraft_render::ChunkCache,
     key: ListKey,
     /// The area `list` was built for (hatch patterns exist only inside it); a view leaving it
     /// rebuilds the list.

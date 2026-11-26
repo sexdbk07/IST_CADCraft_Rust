@@ -1220,12 +1220,11 @@ fn zoom_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     ui.add_space(6.0);
     ui.label(RichText::new(format!("{percent:.0}%")).size(12.0).color(t.text)).on_hover_text(crate::tl!("Zoom level"));
     if let Some(f) = factor {
+        // The canvas rebuilds for the new view in the background when it needs to.
         let _ = app.run("zoom.realtime", json!({ "factor": f }));
-        app.canvas.list = None;
     }
     if let Some(cmd) = run {
         crate::menus::run_transparent(app, cmd);
-        app.canvas.list = None;
     }
 }
 

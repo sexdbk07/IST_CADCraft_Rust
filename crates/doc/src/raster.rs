@@ -61,6 +61,10 @@ impl std::fmt::Debug for Raster {
 pub struct Rasters(Arc<BTreeMap<String, Arc<Raster>>>);
 
 impl Rasters {
+    /// Whether both hold the very same loaded images (copies of one another, unchanged since).
+    pub fn same_as(&self, other: &Rasters) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
     pub fn get(&self, path: &str) -> Option<&Arc<Raster>> {
         self.0.get(path)
     }
