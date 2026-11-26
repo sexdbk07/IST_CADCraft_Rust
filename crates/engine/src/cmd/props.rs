@@ -32,7 +32,12 @@ pub fn specs() -> Vec<CommandSpec> {
              sourceBlock?, blockScale?, blockRotation? (block content), point: positionX/Y/Z?, \
              spline: closed? (fit splines), vertex with vertexX?/vertexY? (fit points, else control vertices), ray and xline: basePointX/Y/Z?, secondPointX/Y?, \
              hatch: pattern?, angle?, scale?, originX/Y?, elevation?, islandStyle?: 0|1|2, associative?: false, background?: colour | \"None\", \
-             gradientColor1/2?, gradientAngle?, centered?, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
+             gradientColor1/2?, gradientAngle?, centered?, \
+             table: tableStyle?, tableWidth?, tableHeight?, positionX/Y/Z?, viewport: centerX/Y?, width?, height?, standardScale?, customScale?, twistAngle?, on?, locked?, \
+             image: positionX/Y/Z?, rotation?, imageWidth?, imageHeight?, brightness?, contrast?, fade? (0..100), showImage?, clipping?, \
+             wipeout, solid, trace, 3D face, 3D polyline: vertex with vertexX?/vertexY? (vertexZ? for 3D face and 3D polyline), 3D polyline: closed?, \
+             helix: centerX/Y/Z?, baseRadius?, topRadius?, helixHeight?, turns?, ccw?, tolerance: dimStyle?, text?, positionX/Y/Z?, \
+             attribute definition: tag?, prompt?, text? (default), invisible?, constant?, verify?, preset?, lockPosition? and text's keys, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
              mtext: style?, justify?, lineSpacing?, lineSpacingDistance?, lineSpacingStyle?: atLeast | exactly, positionX/Y/Z?, \
              dimension: dimStyle?, textOverride?, textRotation?, textPositionX/Y?, prefix?, suffix?, altPrefix?, altSuffix?, dimScale?, precision?, \
              <dimension style variables (field or DIM* name, e.g. textHeight / DIMTXT) set as overrides of each dimension>, clearOverrides?, clear?: [variable]} \
@@ -50,7 +55,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(
                 "{handles?, type?: one of the `types` names, to describe only those objects} → {types: [{type, count}], filter?, count, \
                  groups: [{name, rows: [{key, label, kind, value, varies, display, editable, note?, overridden?, options?: [{value, label}], quick?}]}]} \
-                 (each row's `key` is the `properties.set` key that changes it; text, mtext, dimensions, lines, circles, arcs, polylines, points, ellipses, block references, hatches, leaders and multileaders have their own groups)",
+                 (each row's `key` is the `properties.set` key that changes it; text, mtext, dimensions, lines, circles, arcs, polylines, points, ellipses, block references, hatches, leaders, multileaders, splines, rays, xlines, tables, viewports, images, wipeouts, regions, solids, 3D faces, 3D polylines, polyface meshes, multilines, tolerances, helixes and attribute definitions have their own groups)",
             )
             .noundo(),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)

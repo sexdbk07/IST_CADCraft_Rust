@@ -959,6 +959,220 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
             c.row("directionY", "Direction vector Y", Kind::Number, rs.iter().map(|r| n(r.dir.y))).read_only(),
         ])];
     }
+    if let Some(ts) = all_of(ents, |k| if let EntityKind::Table(x) = k { Some(x) } else { None }) {
+        let styles = c.d.table_styles.iter().map(|t| Choice::new(json!(t.name), t.name.clone())).collect();
+        let ro = |r: Row| Row { note: Some("Insert or delete rows and columns from the table's own commands.".into()), ..r.read_only() };
+        return vec![
+            Group {
+                name: "Table",
+                rows: vec![
+                    c.choice("tableStyle", "Table style", Kind::Choice, styles, ts.iter().map(|t| json!(t.style))).quick(),
+                    ro(c.row("rows", "Rows", Kind::Number, ts.iter().map(|t| json!(t.row_heights.len())))),
+                    ro(c.row("columns", "Columns", Kind::Number, ts.iter().map(|t| json!(t.col_widths.len())))),
+                    c.row("tableWidth", "Table width", Kind::Distance, ts.iter().map(|t| n(t.col_widths.iter().sum()))),
+                    c.row("tableHeight", "Table height", Kind::Distance, ts.iter().map(|t| n(t.row_heights.iter().sum()))),
+                ],
+            },
+            geometry(vec![
+                c.row("positionX", "Position X", Kind::Distance, ts.iter().map(|t| n(t.insert.x))),
+                c.row("positionY", "Position Y", Kind::Distance, ts.iter().map(|t| n(t.insert.y))),
+                c.row("positionZ", "Position Z", Kind::Distance, ts.iter().map(|t| n(t.insert.z))),
+            ]),
+        ];
+    }
+    if let Some(vs) = all_of(ents, |k| if let EntityKind::Viewport(x) = k { Some(x) } else { None }) {
+        let scale = |v: &cadcraft_doc::Viewport| if v.view_height > 0.0 { n(v.height / v.view_height) } else { Value::Null };
+        let standard: Vec<Choice> = [
+            (1.0, "1:1"), (0.5, "1:2"), (0.25, "1:4"), (0.2, "1:5"), (0.125, "1:8"), (0.1, "1:10"), (1.0 / 16.0, "1:16"), (0.05, "1:20"),
+            (1.0 / 30.0, "1:30"), (0.025, "1:40"), (0.02, "1:50"), (0.01, "1:100"), (0.005, "1:200"), (0.002, "1:500"), (0.001, "1:1000"),
+            (2.0, "2:1"), (4.0, "4:1"), (8.0, "8:1"), (10.0, "10:1"), (100.0, "100:1"),
+        ]
+        .iter()
+        .map(|(v, l)| Choice::new(json!(v), *l))
+        .collect();
+        let named = |v: &cadcraft_doc::Viewport| {
+            let sc = if v.view_height > 0.0 { v.height / v.view_height } else { 0.0 };
+            standard.iter().find(|o| o.value.as_f64().is_some_and(|x| (x - sc).abs() <= 1e-9 * x.max(1.0))).map_or(json!("Custom"), |o| o.value.clone())
+        };
+        let mut std_row = c.choice("standardScale", "Standard scale", Kind::Choice, standard.clone(), vs.iter().copied().map(named));
+        if std_row.value == json!("Custom") {
+            std_row.display = "Custom".into();
+        }
+        return vec![
+            geometry(vec![
+                c.row("centerX", "Center X", Kind::Distance, vs.iter().map(|v| n(v.center.x))),
+                c.row("centerY", "Center Y", Kind::Distance, vs.iter().map(|v| n(v.center.y))),
+                c.row("width", "Width", Kind::Distance, vs.iter().map(|v| n(v.width))),
+                c.row("height", "Height", Kind::Distance, vs.iter().map(|v| n(v.height))),
+            ]),
+            Group {
+                name: "Misc",
+                rows: vec![
+                    c.row("on", "On", Kind::Bool, vs.iter().map(|v| json!(v.on))),
+                    c.row("clipped", "Clipped", Kind::Bool, vs.iter().map(|v| json!(v.clip.is_some()))).read_only(),
+                    c.row("locked", "Display locked", Kind::Bool, vs.iter().map(|v| json!(v.locked))).quick(),
+                    std_row,
+                    c.row("customScale", "Custom scale", Kind::Number, vs.iter().copied().map(scale)),
+                    c.row("twistAngle", "Twist angle", Kind::Angle, vs.iter().map(|v| n(v.twist.to_degrees()))),
+                ],
+            },
+        ];
+    }
+    if let Some(ims) = all_of(ents, |k| if let EntityKind::Image(x) = k { Some(x) } else { None }) {
+        let width = |im: &cadcraft_doc::Image| n(im.u.xy().len() * im.size.x);
+        let height = |im: &cadcraft_doc::Image| n(im.v.xy().len() * im.size.y);
+        return vec![
+            geometry(vec![
+                c.row("positionX", "Position X", Kind::Distance, ims.iter().map(|im| n(im.insert.x))),
+                c.row("positionY", "Position Y", Kind::Distance, ims.iter().map(|im| n(im.insert.y))),
+                c.row("positionZ", "Position Z", Kind::Distance, ims.iter().map(|im| n(im.insert.z))),
+                c.row("rotation", "Rotation", Kind::Angle, ims.iter().map(|im| n(cadcraft_geom::norm_angle(im.u.y.atan2(im.u.x)).to_degrees()))),
+                c.row("imageWidth", "Width", Kind::Distance, ims.iter().copied().map(width)),
+                c.row("imageHeight", "Height", Kind::Distance, ims.iter().copied().map(height)),
+            ]),
+            Group {
+                name: "Image Adjust",
+                rows: vec![
+                    c.row("brightness", "Brightness", Kind::Number, ims.iter().map(|im| json!(im.brightness))),
+                    c.row("contrast", "Contrast", Kind::Number, ims.iter().map(|im| json!(im.contrast))),
+                    c.row("fade", "Fade", Kind::Number, ims.iter().map(|im| json!(im.fade))),
+                ],
+            },
+            Group {
+                name: "Misc",
+                rows: vec![
+                    c.row("name", "Name", Kind::Text, ims.iter().map(|im| json!(if im.name.is_empty() { &im.path } else { &im.name }))).read_only(),
+                    c.row("path", "Saved path", Kind::Text, ims.iter().map(|im| json!(im.path))).read_only(),
+                    c.row("showImage", "Show image", Kind::Bool, ims.iter().map(|im| json!(im.display & 1 != 0))),
+                    c.row("clipping", "Show clipped", Kind::Bool, ims.iter().map(|im| json!(im.clipping))),
+                ],
+            },
+        ];
+    }
+    if let Some(ws) = all_of(ents, |k| if let EntityKind::Wipeout(x) = k { Some(x) } else { None }) {
+        return vec![geometry(vec![
+            c.row("vertices", "Vertices", Kind::Number, ws.iter().map(|w| json!(w.vertices().len()))).read_only(),
+            c.row("area", "Area", Kind::Number, ws.iter().map(|w| n(cadcraft_geom::shoelace(w.vertices()).abs()))).read_only(),
+        ])];
+    }
+    if let Some(rs) = all_of(ents, |k| if let EntityKind::Region(x) = k { Some(x) } else { None }) {
+        return vec![geometry(vec![
+            c.row("area", "Area", Kind::Number, rs.iter().map(|r| n(r.area()))).read_only(),
+            c.row("perimeter", "Perimeter", Kind::Distance, rs.iter().map(|r| n(r.perimeter()))).read_only(),
+        ])];
+    }
+    if let Some(ss) = all_of(ents, |k| match k {
+        EntityKind::Solid(x) | EntityKind::Trace(x) => Some(x),
+        _ => None,
+    }) {
+        return vec![geometry(vec![c.row("vertices", "Vertices", Kind::Number, ss.iter().map(|_| json!(4))).read_only()])];
+    }
+    if let Some(fs) = all_of(ents, |k| if let EntityKind::Face3d(x) = k { Some(x) } else { None }) {
+        return vec![geometry(vec![c.row("vertices", "Vertices", Kind::Number, fs.iter().map(|_| json!(4))).read_only()])];
+    }
+    if let Some(ps) = all_of(ents, |k| if let EntityKind::Polyline3d(x) = k { Some(x) } else { None }) {
+        let length = |pl: &cadcraft_doc::Polyline3d| {
+            let segs = pl.points.windows(2).map(|w| (w[1] - w[0]).len()).sum::<f64>();
+            let close = if pl.closed { pl.points.last().zip(pl.points.first()).map_or(0.0, |(a, b)| (*b - *a).len()) } else { 0.0 };
+            n(segs + close)
+        };
+        return vec![
+            geometry(vec![
+                c.row("vertices", "Vertices", Kind::Number, ps.iter().map(|pl| json!(pl.points.len()))).read_only(),
+                c.row("length", "Length", Kind::Distance, ps.iter().copied().map(length)).read_only(),
+            ]),
+            Group { name: "Misc", rows: vec![c.row("closed", "Closed", Kind::Bool, ps.iter().map(|pl| json!(pl.closed)))] },
+        ];
+    }
+    if let Some(ps) = all_of(ents, |k| if let EntityKind::PolyfaceMesh(x) = k { Some(x) } else { None }) {
+        return vec![geometry(vec![
+            c.row("vertices", "Vertices", Kind::Number, ps.iter().map(|m| json!(m.vertices.len()))).read_only(),
+            c.row("faces", "Faces", Kind::Number, ps.iter().map(|m| json!(m.faces.len()))).read_only(),
+        ])];
+    }
+    if let Some(ms) = all_of(ents, |k| if let EntityKind::MLine(x) = k { Some(x) } else { None }) {
+        let just = |m: &cadcraft_doc::MLine| {
+            json!(match m.justification {
+                cadcraft_doc::MLineJust::Top => "Top",
+                cadcraft_doc::MLineJust::Zero => "Zero",
+                cadcraft_doc::MLineJust::Bottom => "Bottom",
+            })
+        };
+        let note = "Change a multiline with MLEDIT or its grips.";
+        let ro = |r: Row| Row { note: Some(note.into()), ..r.read_only() };
+        return vec![
+            geometry(vec![ro(c.row("vertices", "Vertices", Kind::Number, ms.iter().map(|m| json!(m.vertices.len()))))]),
+            Group {
+                name: "Misc",
+                rows: vec![
+                    ro(c.row("mlineStyle", "Style name", Kind::Text, ms.iter().map(|m| json!(m.style)))),
+                    ro(c.row("justification", "Justification", Kind::Text, ms.iter().copied().map(just))),
+                    ro(c.row("mlineScale", "Scale", Kind::Number, ms.iter().map(|m| n(m.scale)))),
+                    ro(c.row("closed", "Closed", Kind::Bool, ms.iter().map(|m| json!(m.closed)))),
+                ],
+            },
+        ];
+    }
+    if let Some(ts) = all_of(ents, |k| if let EntityKind::Tolerance(x) = k { Some(x) } else { None }) {
+        return vec![
+            geometry(vec![
+                c.row("positionX", "Position X", Kind::Distance, ts.iter().map(|t| n(t.insert.x))),
+                c.row("positionY", "Position Y", Kind::Distance, ts.iter().map(|t| n(t.insert.y))),
+                c.row("positionZ", "Position Z", Kind::Distance, ts.iter().map(|t| n(t.insert.z))),
+            ]),
+            Group {
+                name: "Misc",
+                rows: vec![
+                    c.choice("dimStyle", "Dim style", Kind::DimStyle, c.dim_styles(), ts.iter().map(|t| json!(t.style))).quick(),
+                    c.row("text", "Text", Kind::Text, ts.iter().map(|t| json!(t.text))),
+                ],
+            },
+        ];
+    }
+    if let Some(hs) = all_of(ents, |k| if let EntityKind::Helix(x) = k { Some(x) } else { None }) {
+        let twist = vec![Choice::new(json!(true), "CCW"), Choice::new(json!(false), "CW")];
+        return vec![geometry(vec![
+            c.row("centerX", "Position X", Kind::Distance, hs.iter().map(|h| n(h.center.x))),
+            c.row("centerY", "Position Y", Kind::Distance, hs.iter().map(|h| n(h.center.y))),
+            c.row("centerZ", "Position Z", Kind::Distance, hs.iter().map(|h| n(h.center.z))),
+            c.row("baseRadius", "Base radius", Kind::Distance, hs.iter().map(|h| n(h.base_radius))),
+            c.row("topRadius", "Top radius", Kind::Distance, hs.iter().map(|h| n(h.top_radius))),
+            c.row("helixHeight", "Height", Kind::Distance, hs.iter().map(|h| n(h.height))),
+            c.row("turns", "Turns", Kind::Number, hs.iter().map(|h| n(h.turns))),
+            c.row("turnHeight", "Turn height", Kind::Distance, hs.iter().map(|h| n(h.turn_height()))).read_only(),
+            c.choice("ccw", "Twist", Kind::Choice, twist, hs.iter().map(|h| json!(h.ccw))),
+        ])];
+    }
+    if let Some(ads) = all_of(ents, |k| if let EntityKind::AttDef(x) = k { Some(x) } else { None }) {
+        let texts: Vec<&Text> = ads.iter().map(|a| &a.text).collect();
+        let mut groups = text_groups(c, ents, &texts);
+        groups.insert(
+            0,
+            Group {
+                name: "Attribute",
+                rows: vec![
+                    c.row("tag", "Tag", Kind::Text, ads.iter().map(|a| json!(a.tag))).quick(),
+                    c.row("prompt", "Prompt", Kind::Text, ads.iter().map(|a| json!(a.prompt))).quick(),
+                    c.row("text", "Value", Kind::Text, ads.iter().map(|a| json!(a.text.value))).quick(),
+                ],
+            },
+        );
+        groups.push(Group {
+            name: "Misc",
+            rows: vec![
+                c.row("invisible", "Invisible", Kind::Bool, ads.iter().map(|a| json!(a.invisible))),
+                c.row("constant", "Constant", Kind::Bool, ads.iter().map(|a| json!(a.constant))),
+                c.row("verify", "Verify", Kind::Bool, ads.iter().map(|a| json!(a.modes.verify))),
+                c.row("preset", "Preset", Kind::Bool, ads.iter().map(|a| json!(a.modes.preset))),
+                c.row("lockPosition", "Lock position", Kind::Bool, ads.iter().map(|a| json!(a.modes.lock_position))),
+            ],
+        });
+        // The definition's default is the Value row; Contents would repeat it.
+        if let Some(g) = groups.iter_mut().find(|g| g.name == "Text") {
+            g.rows.retain(|r| r.key != "text");
+        }
+        return groups;
+    }
     if let Some(ls) = all_of(ents, |k| if let EntityKind::Leader(x) = k { Some(x) } else { None }) {
         let arrows = vec![Choice::new(json!(true), "Arrowhead"), Choice::new(json!(false), "None")];
         return vec![
@@ -1026,15 +1240,22 @@ fn leader_types() -> Vec<Choice> {
     vec![Choice::new(json!("straight"), "Straight"), Choice::new(json!("spline"), "Spline")]
 }
 
+/// A multileader's leader types: Straight, Spline or None (no leader lines).
+fn mleader_types() -> Vec<Choice> {
+    let mut out = leader_types();
+    out.push(Choice::new(json!("none"), "None"));
+    out
+}
+
 /// A multileader's rows, grouped as AutoCAD's palette groups them: Leaders, Text (or Block for
 /// block content), Geometry (the landing) and Misc.
 fn mleader_groups(c: &Ctx, ents: &[&Entity], ms: &[&cadcraft_doc::MLeader]) -> Vec<Group> {
     let n = |v: f64| json!(v);
-    let kind = |m: &cadcraft_doc::MLeader| json!(if m.leaders.is_empty() { "None" } else if m.spline { "spline" } else { "straight" });
+    let kind = |m: &cadcraft_doc::MLeader| json!(if m.leaders.is_empty() { "none" } else if m.spline { "spline" } else { "straight" });
     let mut groups = vec![Group {
         name: "Leaders",
         rows: vec![
-            c.choice("leaderType", "Leader type", Kind::Choice, leader_types(), ms.iter().copied().map(kind)),
+            c.choice("leaderType", "Leader type", Kind::Choice, mleader_types(), ms.iter().copied().map(kind)),
             c.row("arrowheadSize", "Arrowhead size", Kind::Distance, ms.iter().map(|m| n(m.arrow_size))),
             c.row("horizontalLanding", "Horizontal landing", Kind::Bool, ms.iter().map(|m| json!(m.dogleg > 0.0))),
             c.row("landingDistance", "Landing distance", Kind::Distance, ms.iter().map(|m| n(m.dogleg))),

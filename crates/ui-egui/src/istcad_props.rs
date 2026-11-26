@@ -186,7 +186,7 @@ fn selection_box(app: &mut CadApp, ui: &mut egui::Ui, types: &[(String, usize)],
     let full = ui.available_width();
     let (row, _) = ui.allocate_exact_size(vec2(full, 36.0), Sense::hover());
     let rect = Rect::from_min_max(row.min, pos2(row.right() - 3.0 * 30.0, row.bottom()));
-    let resp = ui.interact(rect, ui.id().with("ist_selection_box"), Sense::click());
+    let resp = ui.interact(rect, ui.scope_id().with("ist_selection_box"), Sense::click());
     selection_buttons(app, ui, Rect::from_min_max(pos2(rect.right() + 2.0, row.top()), row.max));
     ui.painter().rect_filled(rect, 4.0, if resp.hovered() { t.control_hover.gamma_multiply(1.15) } else { BOX_FILL });
     let p = ui.painter().with_clip_rect(rect.shrink(2.0));
@@ -230,7 +230,7 @@ fn selection_buttons(app: &mut CadApp, ui: &mut egui::Ui, area: Rect) {
     ];
     for (n, tip) in tips.iter().enumerate() {
         let r = Rect::from_min_size(pos2(area.left() + 30.0 * n as f32, area.top() + 4.0), vec2(28.0, 28.0));
-        let resp = ui.interact(r, ui.id().with(("ist_props_button", n)), Sense::click());
+        let resp = ui.interact(r, ui.scope_id().with(("ist_props_button", n)), Sense::click());
         let p = ui.painter();
         p.rect_filled(r, 4.0, if resp.hovered() { t.control_hover } else { BOX_FILL });
         let c = r.center();
@@ -373,7 +373,7 @@ fn attribute_rows(doc: &Drawing, handles: &[Handle]) -> Vec<PropRow> {
         .collect()
 }
 
-/// One polyline's, leader's or spline's Current vertex (a list to step through) and that vertex's X and
+/// The Current vertex of one polyline, leader, spline, 3D polyline, solid, 3D face or wipeout (a list to step through) and that vertex's X and
 /// Y, as AutoCAD's palette shows them first under Geometry.
 fn vertex_rows(doc: &Drawing, handles: &[Handle], vertex: usize, units: &Units) -> Vec<PropRow> {
     use cadcraft_engine::doc::EntityKind;
@@ -381,6 +381,10 @@ fn vertex_rows(doc: &Drawing, handles: &[Handle], vertex: usize, units: &Units) 
     let points: Vec<(f64, f64)> = match doc.entity(*h).map(|e| &e.kind) {
         Some(EntityKind::LwPolyline(pl)) => pl.vertices.iter().map(|v| (v.p.x, v.p.y)).collect(),
         Some(EntityKind::Leader(l)) => l.vertices.iter().map(|v| (v.x, v.y)).collect(),
+        Some(EntityKind::Polyline3d(pl)) => pl.points.iter().map(|v| (v.x, v.y)).collect(),
+        Some(EntityKind::Solid(so) | EntityKind::Trace(so)) => so.corners.iter().map(|v| (v.x, v.y)).collect(),
+        Some(EntityKind::Face3d(f)) => f.corners.iter().map(|v| (v.x, v.y)).collect(),
+        Some(EntityKind::Wipeout(w)) => w.vertices().iter().map(|v| (v.x, v.y)).collect(),
         // A spline's fit points when it has them (it is fitted again), else its control vertices.
         Some(EntityKind::Spline(sp)) => (if sp.fit.is_empty() { &sp.control } else { &sp.fit }).iter().map(|v| (v.x, v.y)).collect(),
         _ => return Vec::new(),
@@ -648,7 +652,7 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
         // Ctrl+Enter or clicking elsewhere applies), as AutoCAD's palette opens one.
         let width = (ui.max_rect().width() - 8.0).max(rect.width());
         let at = pos2(ui.max_rect().right() - width, rect.bottom() + 2.0);
-        egui::Area::new(ui.id().with("ist_contents_editor"))
+        egui::Area::new(ui.scope_id().with("ist_contents_editor"))
             .order(egui::Order::Foreground)
             .fixed_pos(at)
             .show(ui.ctx(), |ui| {

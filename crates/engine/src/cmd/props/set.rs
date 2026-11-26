@@ -30,12 +30,15 @@ fn set_coords(p: &mut Vec3, c: &Call<'_>, keys: [&'static str; 3], used: &mut Us
     }
 }
 
-/// A block reference's or point's Position X / Position Y: the object moves there, attributes
-/// and all, as MOVE moves it.
+/// The Position X / Position Y of a block reference, point, table, image or tolerance: the
+/// object moves there, attributes and all, as MOVE moves it.
 fn move_to(k: &mut EntityKind, c: &Call<'_>, used: &mut Used<'_>) {
     let at = match k {
         EntityKind::Insert(i) => i.insert.xy(),
         EntityKind::Point(pt) => pt.p.xy(),
+        EntityKind::Table(t) => t.insert.xy(),
+        EntityKind::Image(im) => im.insert.xy(),
+        EntityKind::Tolerance(t) => t.insert.xy(),
         _ => return,
     };
     let (x, y) = (c.num("positionX"), c.num("positionY"));
@@ -55,6 +58,9 @@ fn move_z(k: &mut EntityKind, c: &Call<'_>, used: &mut Used<'_>) {
     match k {
         EntityKind::Insert(i) => i.insert.z = z,
         EntityKind::Point(pt) => pt.p.z = z,
+        EntityKind::Table(t) => t.insert.z = z,
+        EntityKind::Image(im) => im.insert.z = z,
+        EntityKind::Tolerance(t) => t.insert.z = z,
         _ => return,
     }
     used.insert("positionZ");
@@ -260,6 +266,8 @@ struct Call<'a> {
     /// The block a block reference is switched to (its Name row), checked to exist and not to
     /// contain the block being edited.
     block: Option<String>,
+    /// A table style, checked to exist.
+    table_style: Option<String>,
     /// The block a multileader's block content is switched to, checked as `block` is.
     source_block: Option<String>,
     /// Each multileader style's landing distance, for Horizontal landing turned back on.
@@ -389,6 +397,15 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
         Some(n) => Some(block_to_use(s, n)?),
         None => None,
     };
+    let table_style = str_param(p, "tableStyle")
+        .map(|n| {
+            d.table_styles
+                .iter()
+                .find(|t| t.name.eq_ignore_ascii_case(n.trim()))
+                .map(|t| t.name.clone())
+                .ok_or_else(|| bad("properties.set", format!("table style `{n}` not found")))
+        })
+        .transpose()?;
     let source_block = match str_param(p, "sourceBlock") {
         Some(n) => Some(block_to_use(s, n)?),
         None => None,
@@ -408,7 +425,7 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     let prep = Prepared::new(d, p, &hs);
     let anno_scale = d.current_anno_scale();
     let mleader_doglegs: Vec<(String, f64)> = d.mleader_styles.iter().map(|m| (m.name.clone(), m.dogleg)).collect();
-    let c = Call { p, color, transparency, thickness, lineweight, linetype, dim_style, text_style, mleader_style, block, source_block, mleader_doglegs, dim_vars, prep, anno_scale };
+    let c = Call { p, color, transparency, thickness, lineweight, linetype, dim_style, text_style, mleader_style, block, source_block, table_style, mleader_doglegs, dim_vars, prep, anno_scale };
     // A failed call changes nothing (a command's error doesn't undo what it did), so the drawing
     // is taken for writing, and the layer made, only after every check.
     let d = s.doc_mut()?;
@@ -457,6 +474,73 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                 EntityKind::Hatch(ha) => hatch(ha, &c, &mut used),
                 EntityKind::Spline(sp) => spline(sp, &c, &mut used),
                 EntityKind::Ray(r) | EntityKind::XLine(r) => ray(r, &c, &mut used),
+                EntityKind::Table(t) => table(t, &c, &mut used),
+                EntityKind::Viewport(v) => viewport(v, &c, &mut used),
+                EntityKind::Image(im) => image(im, &c, &mut used),
+                EntityKind::Wipeout(w) => {
+                    // The closing point repeats the first: they move together.
+                    let closed = w.boundary.len() > 1 && w.boundary.first() == w.boundary.last();
+                    let last = w.boundary.len().saturating_sub(1);
+                    if let Some(i) = move_vertex(w.boundary.as_mut_slice(), &c, &mut used)
+                        && i == 0
+                        && closed
+                    {
+                        w.boundary[last] = w.boundary[0];
+                    }
+                }
+                EntityKind::Solid(so) | EntityKind::Trace(so) => {
+                    let mut pts: Vec<Vec2> = so.corners.iter().map(|q| q.xy()).collect();
+                    if let Some(i) = move_vertex(&mut pts, &c, &mut used) {
+                        so.corners[i].x = pts[i].x;
+                        so.corners[i].y = pts[i].y;
+                    }
+                }
+                EntityKind::Face3d(f) => {
+                    let mut pts: Vec<Vec2> = f.corners.iter().map(|q| q.xy()).collect();
+                    if let Some(i) = move_vertex(&mut pts, &c, &mut used) {
+                        f.corners[i].x = pts[i].x;
+                        f.corners[i].y = pts[i].y;
+                    }
+                    if let Some(i) = vertex_index(&c)
+                        && let (Some(z), Some(q)) = (c.num("vertexZ"), f.corners.get_mut(i))
+                    {
+                        q.z = z;
+                        used.insert("vertexZ");
+                    }
+                }
+                EntityKind::Polyline3d(pl) => {
+                    let mut pts: Vec<Vec2> = pl.points.iter().map(|q| q.xy()).collect();
+                    if let Some(i) = move_vertex(&mut pts, &c, &mut used) {
+                        pl.points[i].x = pts[i].x;
+                        pl.points[i].y = pts[i].y;
+                    }
+                    if let Some(i) = vertex_index(&c)
+                        && let (Some(z), Some(q)) = (c.num("vertexZ"), pl.points.get_mut(i))
+                    {
+                        q.z = z;
+                        used.insert("vertexZ");
+                    }
+                    if let Some(closed) = p.get("closed").and_then(Value::as_bool) {
+                        pl.closed = closed;
+                        used.insert("closed");
+                    }
+                }
+                EntityKind::Helix(hx) => helix(hx, &c, &mut used),
+                EntityKind::Tolerance(t) => {
+                    if let Some(st) = &c.dim_style {
+                        t.style.clone_from(st);
+                        used.insert("dimStyle");
+                    }
+                    if let Some(v) = str_param(p, "text") {
+                        t.text = v.to_string();
+                        used.insert("text");
+                    }
+                }
+                EntityKind::AttDef(a) => {
+                    attdef(a, &c, &mut used);
+                    text(&mut a.text, &c, h, &mut used);
+                    text_position(&mut a.text, &c, &mut used);
+                }
                 _ => {}
             }
         })?;
@@ -474,10 +558,16 @@ fn mleader<'c>(m: &mut cadcraft_doc::MLeader, c: &'c Call<'_>, used: &mut Used<'
         m.style.clone_from(st);
         used.insert("mleaderStyle");
     }
-    // A multileader without leader lines has none to make straight or curved.
-    if let Some(kind) = leader_type(c)
-        && !m.leaders.is_empty()
-    {
+    // None takes the leader lines away; Straight or Spline on a multileader without any gives it
+    // one, down and to the left of the landing (it can then be moved with its grips).
+    if str_param(c.p, "leaderType").is_some_and(|v| v.trim().eq_ignore_ascii_case("none")) {
+        m.leaders.clear();
+        used.insert("leaderType");
+    } else if let Some(kind) = leader_type(c) {
+        if m.leaders.is_empty() {
+            let reach = [m.dogleg * 2.0, m.arrow_size * 4.0, m.text.as_ref().map_or(0.0, |t| t.height * 3.0)].into_iter().fold(1e-3, f64::max);
+            m.leaders.push(vec![Vec3::new(m.landing.x - reach, m.landing.y - reach, m.landing.z)]);
+        }
         m.spline = kind;
         used.insert("leaderType");
     }
@@ -624,6 +714,169 @@ fn ray(r: &mut cadcraft_doc::RayLine, c: &Call<'_>, used: &mut Used<'_>) {
             r.dir = Vec3::new(u.x, u.y, 0.0);
             used.extend(["secondPointX", "secondPointY"].into_iter().filter(|k| c.num(k).is_some()));
         }
+    }
+}
+
+/// Vertex X / Vertex Y of point `vertex` (1 for the first) among `pts`: the index moved.
+fn move_vertex(pts: &mut [Vec2], c: &Call<'_>, used: &mut Used<'_>) -> Option<usize> {
+    let (x, y) = (c.num("vertexX"), c.num("vertexY"));
+    if x.is_none() && y.is_none() {
+        return None;
+    }
+    let i = vertex_index(c)?;
+    let v = pts.get_mut(i)?;
+    if let Some(x) = x {
+        v.x = x;
+        used.insert("vertexX");
+    }
+    if let Some(y) = y {
+        v.y = y;
+        used.insert("vertexY");
+    }
+    used.insert("vertex");
+    Some(i)
+}
+
+/// A table's style and its overall width and height (the columns and rows keep their
+/// proportions).
+fn table(t: &mut cadcraft_doc::Table, c: &Call<'_>, used: &mut Used<'_>) {
+    if let Some(st) = &c.table_style {
+        t.style.clone_from(st);
+        used.insert("tableStyle");
+    }
+    for (key, sizes) in [("tableWidth", &mut t.col_widths), ("tableHeight", &mut t.row_heights)] {
+        let total: f64 = sizes.iter().sum();
+        if let Some(x) = c.num(key).filter(|x| *x > 0.0 && *x < 1e12)
+            && total > 0.0
+        {
+            sizes.iter_mut().for_each(|w| *w *= x / total);
+            used.insert(key);
+        }
+    }
+}
+
+/// A layout viewport's centre and size on the sheet, its scale (Custom scale: sheet units per
+/// drawing unit, as the view's height is worked out), twist, On and Display locked.
+fn viewport(v: &mut cadcraft_doc::Viewport, c: &Call<'_>, used: &mut Used<'_>) {
+    set_coords(&mut v.center, c, ["centerX", "centerY", "centerZ"], used);
+    let scale = if v.view_height > 0.0 { v.height / v.view_height } else { 1.0 };
+    for (key, slot) in [("width", &mut v.width), ("height", &mut v.height)] {
+        if let Some(x) = c.num(key).filter(|x| *x > 0.0 && *x < 1e12) {
+            *slot = x;
+            used.insert(key);
+        }
+    }
+    // A new height keeps the scale: the view shows more, as AutoCAD's does.
+    let mut scale_to = if c.p.get("height").is_some() { Some(scale) } else { None };
+    for key in ["customScale", "standardScale"] {
+        if let Some(x) = c.num(key).filter(|x| *x > 0.0 && *x < 1e12) {
+            scale_to = Some(x);
+            used.insert(key);
+        }
+    }
+    if let Some(sc) = scale_to {
+        v.view_height = v.height / sc;
+    }
+    if let Some(x) = c.num("twistAngle") {
+        v.twist = x.to_radians();
+        used.insert("twistAngle");
+    }
+    for (key, slot) in [("on", &mut v.on), ("locked", &mut v.locked)] {
+        if let Some(b) = c.p.get(key).and_then(Value::as_bool) {
+            *slot = b;
+            used.insert(key);
+        }
+    }
+}
+
+/// A raster image's size, rotation, display and adjustments.
+fn image(im: &mut cadcraft_doc::Image, c: &Call<'_>, used: &mut Used<'_>) {
+    if let Some(w) = c.num("imageWidth").filter(|x| *x > 0.0 && *x < 1e12)
+        && im.size.x > 0.0
+        && im.u.xy().len() > 0.0
+    {
+        let k = w / (im.u.xy().len() * im.size.x);
+        im.u = Vec3::new(im.u.x * k, im.u.y * k, im.u.z * k);
+        used.insert("imageWidth");
+    }
+    if let Some(h) = c.num("imageHeight").filter(|x| *x > 0.0 && *x < 1e12)
+        && im.size.y > 0.0
+        && im.v.xy().len() > 0.0
+    {
+        let k = h / (im.v.xy().len() * im.size.y);
+        im.v = Vec3::new(im.v.x * k, im.v.y * k, im.v.z * k);
+        used.insert("imageHeight");
+    }
+    if let Some(deg) = c.num("rotation") {
+        let turn = deg.to_radians() - im.u.y.atan2(im.u.x);
+        for q in [&mut im.u, &mut im.v] {
+            let r = q.xy().rotate_about(Vec2::new(0.0, 0.0), turn);
+            q.x = r.x;
+            q.y = r.y;
+        }
+        used.insert("rotation");
+    }
+    if let Some(on) = c.p.get("showImage").and_then(Value::as_bool) {
+        im.display = if on { im.display | 1 } else { im.display & !1 };
+        used.insert("showImage");
+    }
+    if let Some(on) = c.p.get("clipping").and_then(Value::as_bool)
+        && !im.clip.is_empty()
+    {
+        im.clipping = on;
+        used.insert("clipping");
+    }
+    for (key, slot) in [("brightness", &mut im.brightness), ("contrast", &mut im.contrast), ("fade", &mut im.fade)] {
+        if let Some(x) = c.num(key).filter(|x| (0.0..=100.0).contains(x)) {
+            *slot = x.round() as u8;
+            used.insert(key);
+        }
+    }
+}
+
+/// A helix's centre, radii, height, turns and twist.
+fn helix(hx: &mut cadcraft_doc::Helix, c: &Call<'_>, used: &mut Used<'_>) {
+    set_coords(&mut hx.center, c, ["centerX", "centerY", "centerZ"], used);
+    for (key, slot) in [("baseRadius", &mut hx.base_radius), ("topRadius", &mut hx.top_radius)] {
+        if let Some(x) = c.num(key).filter(|x| *x >= 0.0 && *x < 1e12) {
+            *slot = x;
+            used.insert(key);
+        }
+    }
+    if let Some(x) = c.num("helixHeight").filter(|x| x.abs() < 1e12) {
+        hx.height = x;
+        used.insert("helixHeight");
+    }
+    if let Some(x) = c.num("turns").filter(|x| *x > 0.0 && *x <= cadcraft_doc::MAX_HELIX_TURNS) {
+        hx.turns = x;
+        used.insert("turns");
+    }
+    if let Some(ccw) = c.p.get("ccw").and_then(Value::as_bool) {
+        hx.ccw = ccw;
+        used.insert("ccw");
+    }
+}
+
+/// An attribute definition's tag, prompt and modes.
+fn attdef(a: &mut cadcraft_doc::Attrib, c: &Call<'_>, used: &mut Used<'_>) {
+    if let Some(tag) = str_param(c.p, "tag").map(str::trim).filter(|t| !t.is_empty() && !t.contains(' ')) {
+        a.tag = tag.to_ascii_uppercase();
+        used.insert("tag");
+    }
+    if let Some(v) = str_param(c.p, "prompt") {
+        a.prompt = v.to_string();
+        used.insert("prompt");
+    }
+    for key in ["invisible", "constant", "verify", "preset", "lockPosition"] {
+        let Some(b) = c.p.get(key).and_then(Value::as_bool) else { continue };
+        match key {
+            "invisible" => a.invisible = b,
+            "constant" => a.constant = b,
+            "verify" => a.modes.verify = b,
+            "preset" => a.modes.preset = b,
+            _ => a.modes.lock_position = b,
+        }
+        used.insert(key);
     }
 }
 

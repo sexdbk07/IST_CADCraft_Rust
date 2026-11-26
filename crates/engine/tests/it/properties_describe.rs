@@ -422,8 +422,9 @@ fn splines_rays_and_hatches_have_their_rows() {
     let rows = describe(&mut s, json!({ "handles": [ray] }));
     assert!((num(&rows, "Geometry", "directionY") - 1.0).abs() < 1e-9, "the ray turns to the second point: {rows}");
 
-    s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
-    let r = s.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "ANSI31" })).unwrap();
+    // Away from the spline and the ray, so the boundary is the rectangle alone.
+    s.execute("rectang", &json!({ "p1": [100, -50], "p2": [110, -40] })).unwrap();
+    let r = s.execute("hatch", &json!({ "points": [[105, -45]], "pattern": "ANSI31" })).unwrap();
     let h = handle(&r);
     let rows = describe(&mut s, json!({ "handles": [h] }));
     assert!((num(&rows, "Geometry", "area") - 100.0).abs() < 1e-6, "{rows}");
@@ -432,4 +433,51 @@ fn splines_rays_and_hatches_have_their_rows() {
     let rows = describe(&mut s, json!({ "handles": [h] }));
     assert_eq!((num(&rows, "Pattern", "originX"), row(&rows, "Pattern", "islandStyle")["display"].as_str()), (2.0, Some("Ignore")));
     assert_ne!(row(&rows, "Pattern", "background")["value"], "None");
+}
+
+#[test]
+fn tables_helixes_3d_polylines_and_attribute_definitions_are_edited() {
+    let mut s = Session::new();
+    s.execute("table", &json!({ "at": [0, 20], "cells": [["1", ""], ["2", ""]], "rowHeight": 1.0, "colWidth": 3.0 })).unwrap();
+    let t = last(&s);
+    let rows = describe(&mut s, json!({ "handles": [t] }));
+    let width = num(&rows, "Table", "tableWidth");
+    let r = s.execute("properties.set", &json!({ "handles": [t], "tableWidth": width * 2.0, "positionX": 5 })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let rows = describe(&mut s, json!({ "handles": [t] }));
+    assert!((num(&rows, "Table", "tableWidth") - width * 2.0).abs() < 1e-9);
+    assert_eq!(num(&rows, "Geometry", "positionX"), 5.0);
+
+    s.execute("helix", &json!({ "center": [0, 0], "baseRadius": 2, "height": 10, "turns": 5 })).unwrap();
+    let hx = last(&s);
+    s.execute("properties.set", &json!({ "handles": [hx], "turns": 10, "topRadius": 1 })).unwrap();
+    let rows = describe(&mut s, json!({ "handles": [hx] }));
+    assert!(num(&rows, "Geometry", "turnHeight") < 2.0, "more turns, closer together: {rows}");
+
+    s.execute("3dpoly", &json!({ "points": [[0, 0, 0], [3, 0, 0], [3, 4, 0]] })).unwrap();
+    let p3 = last(&s);
+    let before = num(&describe(&mut s, json!({ "handles": [p3] })), "Geometry", "length");
+    s.execute("properties.set", &json!({ "handles": [p3], "vertex": 3, "vertexZ": 12 })).unwrap();
+    assert!(num(&describe(&mut s, json!({ "handles": [p3] })), "Geometry", "length") > before);
+
+    s.execute("attdef", &json!({ "tag": "T", "default": "one", "at": [0, 1] })).unwrap();
+    let ad = last(&s);
+    let rows = describe(&mut s, json!({ "handles": [ad] }));
+    assert_eq!(row(&rows, "Attribute", "tag")["value"], "T");
+    let r = s.execute("properties.set", &json!({ "handles": [ad], "tag": "part", "prompt": "Part?", "text": "two", "invisible": true })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let rows = describe(&mut s, json!({ "handles": [ad] }));
+    assert_eq!((row(&rows, "Attribute", "tag")["value"].as_str(), row(&rows, "Attribute", "text")["value"].as_str()), (Some("PART"), Some("two")));
+    assert_eq!(row(&rows, "Misc", "invisible")["value"], true);
+}
+
+#[test]
+fn a_multileader_s_leader_lines_come_and_go() {
+    let mut s = Session::new();
+    s.execute("mleader", &json!({ "points": [[0, 0], [10, 10]], "text": "A" })).unwrap();
+    let m = last(&s);
+    s.execute("properties.set", &json!({ "handles": [m], "leaderType": "none" })).unwrap();
+    assert_eq!(row(&describe(&mut s, json!({ "handles": [m] })), "Leaders", "leaderType")["display"], "None");
+    s.execute("properties.set", &json!({ "handles": [m], "leaderType": "straight" })).unwrap();
+    assert_eq!(row(&describe(&mut s, json!({ "handles": [m] })), "Leaders", "leaderType")["display"], "Straight");
 }
