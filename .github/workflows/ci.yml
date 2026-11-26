@@ -39,6 +39,8 @@ jobs:
         run: "cargo test --locked -p cadcraft-engine --lib -- cmd:: lasso"
       - name: UI unit tests (iStCAD shell + theme)
         run: cargo test --locked -p cadcraft-ui-egui --lib -- istcad theme lasso
+      - name: IO unit tests (DXF/DWG text and attributes)
+        run: cargo test --locked -p cadcraft-io --lib -- attribute kept_dimension
 
   windows:
     name: Build (Windows)
