@@ -210,6 +210,16 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
             _ => {}
         }
     }
+    // Annotation scales by name: the writer numbers the scale list's entries its own way (S0, S1
+    // where the file had A0, A1), and kept data that names a scale (an annotative object's scale
+    // XRECORD) has to find the one written for it.
+    for (kind, _, t) in objects {
+        if kind == "SCALE"
+            && let Some(name) = val(t, 300)
+        {
+            put(head(t).handle, ("SCALE".into(), up(&name)));
+        }
+    }
     let Some((_, _, root)) = objects.first().filter(|(k, _, _)| is_dictionary(k)) else { return out };
     put(head(root).handle, ("NOD".into(), String::new()));
     let by_handle: HashMap<String, (&str, &[Tag])> = objects.iter().filter_map(|(k, _, t)| Some((head(t).handle?, (k.as_str(), *t)))).rev().collect();
