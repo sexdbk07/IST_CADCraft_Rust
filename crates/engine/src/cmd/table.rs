@@ -166,6 +166,34 @@ fn table_handle(s: &Session, p: &Value, id: &str) -> Result<Handle> {
 }
 
 /// Modify the table `handle` with `f`.
+/// Give table `h` `rows` rows and `cols` columns, adding or taking them away at the end (as the
+/// Properties palette's Rows and Columns do); merges and formulas follow as the row and column
+/// commands move them.
+pub(crate) fn resize(s: &mut Session, h: Handle, rows: Option<usize>, cols: Option<usize>) -> Result<Value> {
+    let p = json!({ "handle": h.hex() });
+    edit(s, &p, "properties.set", |t| {
+        if let Some(n) = rows {
+            let n = n.clamp(1, MAX_ROWS);
+            while t.cells.len() < n {
+                insert_row(t, &json!({}))?;
+            }
+            while t.cells.len() > n {
+                delete_row(t, &json!({ "row": t.cells.len() - 1 }))?;
+            }
+        }
+        if let Some(n) = cols {
+            let n = n.clamp(1, MAX_COLS);
+            while t.col_widths.len() < n {
+                insert_col(t, &json!({}))?;
+            }
+            while t.col_widths.len() > n {
+                delete_col(t, &json!({ "col": t.col_widths.len() - 1 }))?;
+            }
+        }
+        Ok(())
+    })
+}
+
 fn edit(s: &mut Session, p: &Value, id: &str, f: impl FnOnce(&mut Table) -> std::result::Result<(), String>) -> Result<Value> {
     let h = table_handle(s, p, id)?;
     let mut t = match s.doc()?.entity(h).map(|e| &e.kind) {
@@ -273,138 +301,146 @@ fn shift_formulas(t: &mut Table, shift: formula::Shift) {
 }
 
 fn run_insert_row(s: &mut Session, p: &Value) -> Result<Value> {
-    edit(s, p, "table.insertrow", |t| {
-        if t.cells.len() >= MAX_ROWS {
-            return Err("too many rows".into());
-        }
-        let r = usize_param(p, "row").unwrap_or(t.cells.len()).min(t.cells.len());
-        let h = p.get("height").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0);
-        let h = h.or_else(|| t.row_heights.last().copied()).unwrap_or(t.text_height * 5.0 / 3.0);
-        let a: Vec<_> = anchors(t)
-            .into_iter()
-            .map(|(ar, ac, rs, cs)| {
-                if ar >= r {
-                    (ar + 1, ac, rs, cs)
-                } else if r < ar + rs {
-                    (ar, ac, rs + 1, cs)
-                } else {
-                    (ar, ac, rs, cs)
-                }
-            })
-            .collect();
-        t.row_heights.insert(r, h);
-        t.cells.insert(r, vec![TableCell::default(); t.col_widths.len()]);
-        if r < t.row_styles.len() {
-            t.row_styles.insert(r, String::new());
-        }
-        set_anchors(t, &a);
-        shift_formulas(t, formula::Shift::InsertRow(r));
-        Ok(())
-    })
+    edit(s, p, "table.insertrow", |t| insert_row(t, p))
+}
+
+fn insert_row(t: &mut Table, p: &Value) -> std::result::Result<(), String> {
+    if t.cells.len() >= MAX_ROWS {
+        return Err("too many rows".into());
+    }
+    let r = usize_param(p, "row").unwrap_or(t.cells.len()).min(t.cells.len());
+    let h = p.get("height").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0);
+    let h = h.or_else(|| t.row_heights.last().copied()).unwrap_or(t.text_height * 5.0 / 3.0);
+    let a: Vec<_> = anchors(t)
+        .into_iter()
+        .map(|(ar, ac, rs, cs)| {
+            if ar >= r {
+                (ar + 1, ac, rs, cs)
+            } else if r < ar + rs {
+                (ar, ac, rs + 1, cs)
+            } else {
+                (ar, ac, rs, cs)
+            }
+        })
+        .collect();
+    t.row_heights.insert(r, h);
+    t.cells.insert(r, vec![TableCell::default(); t.col_widths.len()]);
+    if r < t.row_styles.len() {
+        t.row_styles.insert(r, String::new());
+    }
+    set_anchors(t, &a);
+    shift_formulas(t, formula::Shift::InsertRow(r));
+    Ok(())
 }
 
 fn run_delete_row(s: &mut Session, p: &Value) -> Result<Value> {
-    edit(s, p, "table.deleterow", |t| {
-        let r = usize_param(p, "row").ok_or("`row` is required")?;
-        if r >= t.cells.len() || t.cells.len() <= 1 {
-            return Err("no such row (a table keeps at least one row)".into());
-        }
-        let mut a = Vec::new();
-        for (ar, ac, rs, cs) in anchors(t) {
-            if ar == r {
-                // The anchor row goes: the merge (and its text) moves to the next row.
-                if rs > 1 {
-                    let text = t.cells.get(ar).and_then(|row| row.get(ac)).map(|c| c.text.clone()).unwrap_or_default();
-                    if let Some(cell) = t.cells.get_mut(ar + 1).and_then(|row| row.get_mut(ac)) {
-                        cell.text = text;
-                    }
-                    a.push((ar, ac, rs - 1, cs));
+    edit(s, p, "table.deleterow", |t| delete_row(t, p))
+}
+
+fn delete_row(t: &mut Table, p: &Value) -> std::result::Result<(), String> {
+    let r = usize_param(p, "row").ok_or("`row` is required")?;
+    if r >= t.cells.len() || t.cells.len() <= 1 {
+        return Err("no such row (a table keeps at least one row)".into());
+    }
+    let mut a = Vec::new();
+    for (ar, ac, rs, cs) in anchors(t) {
+        if ar == r {
+            // The anchor row goes: the merge (and its text) moves to the next row.
+            if rs > 1 {
+                let text = t.cells.get(ar).and_then(|row| row.get(ac)).map(|c| c.text.clone()).unwrap_or_default();
+                if let Some(cell) = t.cells.get_mut(ar + 1).and_then(|row| row.get_mut(ac)) {
+                    cell.text = text;
                 }
-            } else if ar > r {
-                a.push((ar - 1, ac, rs, cs));
-            } else if r < ar + rs {
                 a.push((ar, ac, rs - 1, cs));
-            } else {
-                a.push((ar, ac, rs, cs));
             }
+        } else if ar > r {
+            a.push((ar - 1, ac, rs, cs));
+        } else if r < ar + rs {
+            a.push((ar, ac, rs - 1, cs));
+        } else {
+            a.push((ar, ac, rs, cs));
         }
-        t.row_heights.remove(r);
-        t.cells.remove(r);
-        if r < t.row_styles.len() {
-            t.row_styles.remove(r);
-        }
-        if r == 0 {
-            t.title = false;
-        }
-        set_anchors(t, &a);
-        shift_formulas(t, formula::Shift::DeleteRow(r));
-        Ok(())
-    })
+    }
+    t.row_heights.remove(r);
+    t.cells.remove(r);
+    if r < t.row_styles.len() {
+        t.row_styles.remove(r);
+    }
+    if r == 0 {
+        t.title = false;
+    }
+    set_anchors(t, &a);
+    shift_formulas(t, formula::Shift::DeleteRow(r));
+    Ok(())
 }
 
 fn run_insert_col(s: &mut Session, p: &Value) -> Result<Value> {
-    edit(s, p, "table.insertcol", |t| {
-        if t.col_widths.len() >= MAX_COLS {
-            return Err("too many columns".into());
-        }
-        let c = usize_param(p, "col").unwrap_or(t.col_widths.len()).min(t.col_widths.len());
-        let w = p.get("width").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0).or_else(|| t.col_widths.last().copied()).unwrap_or(2.5);
-        let a: Vec<_> = anchors(t)
-            .into_iter()
-            .map(|(ar, ac, rs, cs)| {
-                if ac >= c {
-                    (ar, ac + 1, rs, cs)
-                } else if c < ac + cs {
-                    (ar, ac, rs, cs + 1)
-                } else {
-                    (ar, ac, rs, cs)
-                }
-            })
-            .collect();
-        t.col_widths.insert(c, w);
-        for row in &mut t.cells {
-            row.insert(c.min(row.len()), TableCell::default());
-        }
-        set_anchors(t, &a);
-        shift_formulas(t, formula::Shift::InsertCol(c));
-        Ok(())
-    })
+    edit(s, p, "table.insertcol", |t| insert_col(t, p))
+}
+
+fn insert_col(t: &mut Table, p: &Value) -> std::result::Result<(), String> {
+    if t.col_widths.len() >= MAX_COLS {
+        return Err("too many columns".into());
+    }
+    let c = usize_param(p, "col").unwrap_or(t.col_widths.len()).min(t.col_widths.len());
+    let w = p.get("width").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0).or_else(|| t.col_widths.last().copied()).unwrap_or(2.5);
+    let a: Vec<_> = anchors(t)
+        .into_iter()
+        .map(|(ar, ac, rs, cs)| {
+            if ac >= c {
+                (ar, ac + 1, rs, cs)
+            } else if c < ac + cs {
+                (ar, ac, rs, cs + 1)
+            } else {
+                (ar, ac, rs, cs)
+            }
+        })
+        .collect();
+    t.col_widths.insert(c, w);
+    for row in &mut t.cells {
+        row.insert(c.min(row.len()), TableCell::default());
+    }
+    set_anchors(t, &a);
+    shift_formulas(t, formula::Shift::InsertCol(c));
+    Ok(())
 }
 
 fn run_delete_col(s: &mut Session, p: &Value) -> Result<Value> {
-    edit(s, p, "table.deletecol", |t| {
-        let c = usize_param(p, "col").ok_or("`col` is required")?;
-        if c >= t.col_widths.len() || t.col_widths.len() <= 1 {
-            return Err("no such column (a table keeps at least one column)".into());
-        }
-        let mut a = Vec::new();
-        for (ar, ac, rs, cs) in anchors(t) {
-            if ac == c {
-                if cs > 1 {
-                    let text = t.cells.get(ar).and_then(|row| row.get(ac)).map(|x| x.text.clone()).unwrap_or_default();
-                    if let Some(cell) = t.cells.get_mut(ar).and_then(|row| row.get_mut(ac + 1)) {
-                        cell.text = text;
-                    }
-                    a.push((ar, ac, rs, cs - 1));
+    edit(s, p, "table.deletecol", |t| delete_col(t, p))
+}
+
+fn delete_col(t: &mut Table, p: &Value) -> std::result::Result<(), String> {
+    let c = usize_param(p, "col").ok_or("`col` is required")?;
+    if c >= t.col_widths.len() || t.col_widths.len() <= 1 {
+        return Err("no such column (a table keeps at least one column)".into());
+    }
+    let mut a = Vec::new();
+    for (ar, ac, rs, cs) in anchors(t) {
+        if ac == c {
+            if cs > 1 {
+                let text = t.cells.get(ar).and_then(|row| row.get(ac)).map(|x| x.text.clone()).unwrap_or_default();
+                if let Some(cell) = t.cells.get_mut(ar).and_then(|row| row.get_mut(ac + 1)) {
+                    cell.text = text;
                 }
-            } else if ac > c {
-                a.push((ar, ac - 1, rs, cs));
-            } else if c < ac + cs {
                 a.push((ar, ac, rs, cs - 1));
-            } else {
-                a.push((ar, ac, rs, cs));
             }
+        } else if ac > c {
+            a.push((ar, ac - 1, rs, cs));
+        } else if c < ac + cs {
+            a.push((ar, ac, rs, cs - 1));
+        } else {
+            a.push((ar, ac, rs, cs));
         }
-        t.col_widths.remove(c);
-        for row in &mut t.cells {
-            if c < row.len() {
-                row.remove(c);
-            }
+    }
+    t.col_widths.remove(c);
+    for row in &mut t.cells {
+        if c < row.len() {
+            row.remove(c);
         }
-        set_anchors(t, &a);
-        shift_formulas(t, formula::Shift::DeleteCol(c));
-        Ok(())
-    })
+    }
+    set_anchors(t, &a);
+    shift_formulas(t, formula::Shift::DeleteCol(c));
+    Ok(())
 }
 
 fn run_merge(s: &mut Session, p: &Value) -> Result<Value> {

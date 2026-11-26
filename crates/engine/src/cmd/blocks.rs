@@ -733,11 +733,13 @@ fn run_wblockpick(_s: &mut Session, _p: &Value) -> Result<Value> {
 /// Which pick session WBLOCKPICK is running.
 #[derive(Default)]
 enum WblockPickMode {
-    /// Waiting for the mode keyword ("objects" or "base").
+    /// Waiting for the mode keyword ("objects", "base" or "point").
     #[default]
     Waiting,
     Objects(SelectPhase),
     Base,
+    /// Any point, for a palette's pick button (the Properties palette's coordinates).
+    Point,
 }
 
 #[derive(Default)]
@@ -751,9 +753,10 @@ impl Interactive for WblockPickM {
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         match &self.mode {
-            WblockPickMode::Waiting => Prompt::new("Enter pick mode", Accept::TEXT).kw(&["Objects", "Base"]),
+            WblockPickMode::Waiting => Prompt::new("Enter pick mode", Accept::TEXT).kw(&["Objects", "Base", "Point"]),
             WblockPickMode::Objects(sel) => sel.prompt(),
             WblockPickMode::Base => Prompt::new("Specify insertion base point", Accept::POINT),
+            WblockPickMode::Point => Prompt::new("Specify point", Accept::POINT),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -764,6 +767,8 @@ impl Interactive for WblockPickM {
                         let k = k.to_ascii_lowercase();
                         if k.starts_with('o') {
                             self.mode = WblockPickMode::Objects(SelectPhase::default());
+                        } else if k.starts_with('p') {
+                            self.mode = WblockPickMode::Point;
                         } else {
                             self.mode = WblockPickMode::Base;
                         }
@@ -786,7 +791,7 @@ impl Interactive for WblockPickM {
                     }
                 }
             }
-            WblockPickMode::Base => match i {
+            WblockPickMode::Base | WblockPickMode::Point => match i {
                 Input::Cancel => Ok(Step::Cancel),
                 Input::Point(p) => {
                     s.wblock_picks = Some(WblockPicks { handles: Vec::new(), base: Some(p) });

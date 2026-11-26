@@ -481,3 +481,34 @@ fn a_multileader_s_leader_lines_come_and_go() {
     s.execute("properties.set", &json!({ "handles": [m], "leaderType": "straight" })).unwrap();
     assert_eq!(row(&describe(&mut s, json!({ "handles": [m] })), "Leaders", "leaderType")["display"], "Straight");
 }
+
+#[test]
+fn a_table_s_rows_and_columns_are_added_and_taken_away() {
+    let mut s = Session::new();
+    s.execute("table", &json!({ "at": [0, 20], "cells": [["1", "a"], ["2", "b"]], "rowHeight": 1.0, "colWidth": 3.0 })).unwrap();
+    let t = last(&s);
+    let r = s.execute("properties.set", &json!({ "handles": [t], "rows": 5.0, "columns": 1 })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let rows = describe(&mut s, json!({ "handles": [t] }));
+    assert_eq!((num(&rows, "Table", "rows"), num(&rows, "Table", "columns")), (5.0, 1.0));
+    s.execute("properties.set", &json!({ "handles": [t], "rows": 2 })).unwrap();
+    assert_eq!(num(&describe(&mut s, json!({ "handles": [t] })), "Table", "rows"), 2.0);
+}
+
+#[test]
+fn a_viewport_s_size_and_scale_are_edited() {
+    let mut s = Session::new();
+    s.execute("layout.set", &json!({ "name": "Layout1" })).unwrap();
+    let r = s.execute("mview", &json!({ "p1": [10, 10], "p2": [110, 60] })).unwrap();
+    let v = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).expect("mview answers its viewport").to_string();
+    let r = s.execute("properties.set", &json!({ "handles": [v], "standardScale": 0.5, "locked": true })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let rows = describe(&mut s, json!({ "handles": [v] }));
+    assert_eq!(row(&rows, "Misc", "standardScale")["display"], "1:2");
+    assert!((num(&rows, "Misc", "customScale") - 0.5).abs() < 1e-9);
+    // A taller viewport keeps its scale and shows more.
+    s.execute("properties.set", &json!({ "handles": [v], "height": 80 })).unwrap();
+    let rows = describe(&mut s, json!({ "handles": [v] }));
+    assert_eq!(num(&rows, "Geometry", "height"), 80.0);
+    assert!((num(&rows, "Misc", "customScale") - 0.5).abs() < 1e-9);
+}

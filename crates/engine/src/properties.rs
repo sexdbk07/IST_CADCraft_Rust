@@ -961,14 +961,13 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
     }
     if let Some(ts) = all_of(ents, |k| if let EntityKind::Table(x) = k { Some(x) } else { None }) {
         let styles = c.d.table_styles.iter().map(|t| Choice::new(json!(t.name), t.name.clone())).collect();
-        let ro = |r: Row| Row { note: Some("Insert or delete rows and columns from the table's own commands.".into()), ..r.read_only() };
         return vec![
             Group {
                 name: "Table",
                 rows: vec![
                     c.choice("tableStyle", "Table style", Kind::Choice, styles, ts.iter().map(|t| json!(t.style))).quick(),
-                    ro(c.row("rows", "Rows", Kind::Number, ts.iter().map(|t| json!(t.row_heights.len())))),
-                    ro(c.row("columns", "Columns", Kind::Number, ts.iter().map(|t| json!(t.col_widths.len())))),
+                    c.row("rows", "Rows", Kind::Number, ts.iter().map(|t| json!(t.row_heights.len()))),
+                    c.row("columns", "Columns", Kind::Number, ts.iter().map(|t| json!(t.col_widths.len()))),
                     c.row("tableWidth", "Table width", Kind::Distance, ts.iter().map(|t| n(t.col_widths.iter().sum()))),
                     c.row("tableHeight", "Table height", Kind::Distance, ts.iter().map(|t| n(t.row_heights.iter().sum()))),
                 ],

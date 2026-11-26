@@ -33,7 +33,7 @@ pub fn specs() -> Vec<CommandSpec> {
              spline: closed? (fit splines), vertex with vertexX?/vertexY? (fit points, else control vertices), ray and xline: basePointX/Y/Z?, secondPointX/Y?, \
              hatch: pattern?, angle?, scale?, originX/Y?, elevation?, islandStyle?: 0|1|2, associative?: false, background?: colour | \"None\", \
              gradientColor1/2?, gradientAngle?, centered?, \
-             table: tableStyle?, tableWidth?, tableHeight?, positionX/Y/Z?, viewport: centerX/Y?, width?, height?, standardScale?, customScale?, twistAngle?, on?, locked?, \
+             table: tableStyle?, rows?, columns?, tableWidth?, tableHeight?, positionX/Y/Z?, viewport: centerX/Y?, width?, height?, standardScale?, customScale?, twistAngle?, on?, locked?, \
              image: positionX/Y/Z?, rotation?, imageWidth?, imageHeight?, brightness?, contrast?, fade? (0..100), showImage?, clipping?, \
              wipeout, solid, trace, 3D face, 3D polyline: vertex with vertexX?/vertexY? (vertexZ? for 3D face and 3D polyline), 3D polyline: closed?, \
              helix: centerX/Y/Z?, baseRadius?, topRadius?, helixHeight?, turns?, ccw?, tolerance: dimStyle?, text?, positionX/Y/Z?, \

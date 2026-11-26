@@ -545,6 +545,28 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
             }
         })?;
     }
+    // A table's Rows and Columns: rows and columns added or taken away at the end, as the
+    // table's own row and column commands do it.
+    let size = |k: &str| {
+        let v = p.get(k)?;
+        // A whole number, typed as 4 or 4.0.
+        let n = v.as_u64().or_else(|| v.as_f64().filter(|x| x.fract() == 0.0 && (1.0..1e6).contains(x)).map(|x| x as u64))?;
+        usize::try_from(n).ok().filter(|n| *n >= 1)
+    };
+    let (rows, cols) = (size("rows"), size("columns"));
+    if rows.is_some() || cols.is_some() {
+        let tables: Vec<Handle> = {
+            let d = s.doc()?;
+            hs.iter().copied().filter(|h| matches!(d.entity(*h).map(|e| &e.kind), Some(EntityKind::Table(_)))).collect()
+        };
+        for h in &tables {
+            super::super::table::resize(s, *h, rows, cols)?;
+        }
+        if !tables.is_empty() {
+            used.extend(rows.map(|_| "rows"));
+            used.extend(cols.map(|_| "columns"));
+        }
+    }
     let ignored: Vec<&str> = p
         .as_object()
         .map(|o| o.keys().map(String::as_str).filter(|k| !matches!(*k, "handles" | "handle") && !used.contains(k)).collect())

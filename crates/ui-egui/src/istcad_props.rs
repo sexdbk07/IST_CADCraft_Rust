@@ -67,11 +67,29 @@ struct PropRow {
     label: String,
     value: String,
     edit: Edit,
+    /// An X row with its Y row in the same group: a button picks both from the drawing.
+    pick: Option<PointPick>,
+}
+
+/// A point picked in the drawing for a pair of coordinate rows: `properties.set` with `x` and
+/// `y` set to it, plus `extra` (a vertex's number).
+#[derive(Clone, Debug, PartialEq)]
+struct PointPick {
+    x: &'static str,
+    y: &'static str,
+    extra: Value,
+}
+
+/// A point pick under way: what it sets, on which objects, in which drawing.
+struct PendingPoint {
+    pick: PointPick,
+    handles: Vec<Handle>,
+    uid: Option<u64>,
 }
 
 impl PropRow {
     fn new(label: &str, value: impl Into<String>, edit: Edit) -> Self {
-        PropRow { label: label.to_string(), value: value.into(), edit }
+        PropRow { label: label.to_string(), value: value.into(), edit, pick: None }
     }
     fn read(label: &str, value: impl Into<String>) -> Self {
         Self::new(label, value, Edit::ReadOnly)
@@ -98,6 +116,8 @@ pub struct State {
     focus_pending: bool,
     /// A polyline's Current vertex (0 for the first), as AutoCAD's palette steps through them.
     vertex: usize,
+    /// A point being picked for a pair of coordinate rows.
+    point: Option<PendingPoint>,
 }
 
 /// Show or hide the palette (Ctrl+1, PROPERTIES), as iStCAD's `TogglePropertiesPalette`, which
@@ -115,6 +135,7 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
     if !app.istcad.props.open {
         return;
     }
+    finish_point_pick(app);
     let t = Tokens::get();
     // iStCAD 1.0.233: `#313741`, padding 6, resizable by dragging its left edge.
     let frame = egui::Frame::NONE.fill(PANEL_FILL).corner_radius(4).inner_margin(egui::Margin::symmetric(6, 0));
@@ -138,7 +159,8 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
                 Some(f) => sel.iter().copied().filter(|h| doc.entity(*h).is_some_and(|e| e.kind.type_name() == f)).collect(),
                 None => sel.clone(),
             };
-            let sections = sections(doc, &handles, view, app.istcad.props.vertex);
+            let mut sections = sections(doc, &handles, view, app.istcad.props.vertex);
+            sections.iter_mut().for_each(add_pick_buttons);
             app.istcad.props.filter = filter;
             selection_box(app, ui, &types, sel.len());
             ui.add_space(5.0);
@@ -538,6 +560,58 @@ fn section_ui(app: &mut CadApp, ui: &mut egui::Ui, s: &Section, handles: &[Handl
     ui.add_space(6.0);
 }
 
+/// Pair each X row with its Y row in `s`, as AutoCAD's palette puts a pick button on them.
+fn add_pick_buttons(s: &mut Section) {
+    let keys: Vec<&'static str> = s.rows.iter().filter_map(|r| if let Edit::Number(k) = &r.edit { Some(*k) } else { None }).collect();
+    for r in &mut s.rows {
+        r.pick = match &r.edit {
+            Edit::Number(k) if k.ends_with('X') => {
+                let stem = &k[..k.len() - 1];
+                keys.iter().find(|y| y.len() == k.len() && y.starts_with(stem) && y.ends_with('Y')).map(|y| PointPick { x: *k, y: *y, extra: Value::Null })
+            }
+            Edit::VertexCoord { x: true, index } => Some(PointPick { x: "vertexX", y: "vertexY", extra: json!({ "vertex": index + 1 }) }),
+            _ => None,
+        };
+    }
+}
+
+/// Pick a point in the drawing for `pick` on `handles`: the palette stays, the command line asks
+/// for the point.
+fn start_point_pick(app: &mut CadApp, handles: &[Handle], pick: &PointPick) {
+    let uid = app.session.state().ok().map(|s| s.uid);
+    app.session.wblock_picks = None;
+    app.start("wblockpick");
+    if app.session.running.is_none() {
+        app.set_status("A point can't be picked now.");
+        return;
+    }
+    if let Err(e) = app.session.input(cadcraft_engine::Input::Keyword("Point".into())) {
+        app.session.echo(e.to_string());
+        return;
+    }
+    app.istcad.props.point = Some(PendingPoint { pick: pick.clone(), handles: handles.to_vec(), uid });
+}
+
+/// Once the point is picked, set the rows to it; Esc leaves them as they were.
+fn finish_point_pick(app: &mut CadApp) {
+    if app.istcad.props.point.is_none() || app.session.running.is_some() {
+        return;
+    }
+    let Some(pending) = app.istcad.props.point.take() else { return };
+    let picks = app.session.wblock_picks.take();
+    if app.session.state().ok().map(|s| s.uid) != pending.uid {
+        return;
+    }
+    let Some(at) = picks.and_then(|p| p.base) else { return };
+    let mut params = serde_json::Map::new();
+    params.insert(pending.pick.x.to_string(), json!(at.x));
+    params.insert(pending.pick.y.to_string(), json!(at.y));
+    if let Some(extra) = pending.pick.extra.as_object() {
+        params.extend(extra.clone());
+    }
+    apply(app, &pending.handles, Value::Object(params));
+}
+
 /// One row (iStCAD's `AddPropertyRow`), and its editing.
 fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, handles: &[Handle]) {
     let t = Tokens::get();
@@ -565,6 +639,29 @@ fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, hand
     let resp = resp.on_hover_text(format!("{}: {}", row.label, row.value));
     if !editable || editing {
         return;
+    }
+    // The pick button, at the value's left when the row is pointed at.
+    if let Some(pk) = &row.pick {
+        let b = Rect::from_center_size(pos2(value_rect.left() + 11.0, value_rect.center().y), vec2(20.0, 20.0));
+        let id = ui.scope_id().with(("ist_pick", row_id));
+        let shown = resp.hovered() || ui.rect_contains_pointer(b) || ui.memory(|m| m.has_focus(id));
+        let br = ui.interact(b, id, Sense::click());
+        if shown {
+            let p = ui.painter();
+            p.rect_filled(b, 3.0, if br.hovered() { t.control_hover } else { BOX_FILL });
+            let c = b.center();
+            let ink = Stroke::new(1.2, VALUE_INK);
+            p.circle_stroke(c, 4.5, ink);
+            p.line_segment([c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)], ink);
+            p.line_segment([c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)], ink);
+        }
+        crate::icons::describe_control(ui, &br, &format!("Pick point for {}", row.label), None, false);
+        let br = br.on_hover_text(crate::tl!("Pick a point in the drawing"));
+        if br.clicked() {
+            let pk = pk.clone();
+            start_point_pick(app, handles, &pk);
+            return;
+        }
     }
     match &row.edit {
         Edit::Choice(key, options) => {

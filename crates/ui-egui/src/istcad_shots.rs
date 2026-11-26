@@ -245,3 +245,33 @@ fn istcad_properties_edit_block_attributes() {
     });
     assert_eq!(value.as_deref(), Some("B-2"));
 }
+
+/// A coordinate pair's pick button: the command line asks for a point, and the rows take it.
+#[test]
+fn istcad_properties_pick_a_point_for_coordinates() {
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        istcad_app(),
+    );
+    h.run_steps(3);
+    let circle = h.state().session.doc().ok().and_then(|d| {
+        d.model.iter().find(|e| matches!(e.kind, cadcraft_engine::doc::EntityKind::Circle(_))).map(|e| e.handle.hex())
+    });
+    let Some(c) = circle else { panic!("the sample has a circle") };
+    let _ = h.state_mut().run("select", json!({ "handles": [c] }));
+    let _ = h.state_mut().run("ui.istcad.properties", json!({ "on": true }));
+    h.run_steps(4);
+    h.get_by_label("Pick point for Center X").click();
+    h.run_steps(2);
+    assert!(h.state().session.running.is_some(), "the command line asks for the point");
+    h.state_mut().session.input(cadcraft_engine::Input::Point(cadcraft_geom::Vec2::new(123.0, 45.0))).unwrap();
+    h.run_steps(3);
+    let center = h.state().session.doc().unwrap().model.iter().find(|e| e.handle.hex() == c).and_then(|e| match &e.kind {
+        cadcraft_engine::doc::EntityKind::Circle(k) => Some((k.center.x, k.center.y)),
+        _ => None,
+    });
+    assert_eq!(center, Some((123.0, 45.0)));
+}
