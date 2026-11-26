@@ -60,6 +60,8 @@ pub mod icons;
 pub mod istcad;
 pub mod istcad_icons;
 pub mod istcad_props;
+#[cfg(test)]
+mod istcad_shots;
 pub mod keys;
 pub mod layers;
 pub mod managers;

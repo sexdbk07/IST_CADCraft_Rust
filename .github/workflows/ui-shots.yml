@@ -1,0 +1,53 @@
+name: UI screenshots
+
+# Renders the iStCAD window headlessly (wgpu on Mesa's software Vulkan) and publishes the PNGs
+# on the `ci-shots` branch, so the layout can be checked against iStCAD without a display.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ui-shots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcb1-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev \
+            libfreetype-dev libgl1-mesa-dev libgtk-3-dev mesa-vulkan-drivers libvulkan1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ui-shots
+      - name: Render the iStCAD window
+        # A runner without a usable software adapter only loses the pictures, not the build.
+        continue-on-error: true
+        env:
+          CRAFT_UI_SUITE_SHOTS: /tmp/shots
+          WGPU_BACKEND: vulkan
+        run: cargo test --locked -p cadcraft-ui-egui --lib -- istcad_shots --nocapture
+      - name: Publish on ci-shots
+        if: hashFiles('/tmp/shots/*.png') != '' || always()
+        continue-on-error: true
+        run: |
+          set -e
+          ls /tmp/shots/*.png
+          cd /tmp/shots
+          echo "${GITHUB_SHA}" > SOURCE_COMMIT
+          git init -q -b ci-shots
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add .
+          git commit -q -m "UI screenshots for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" ci-shots
