@@ -4,14 +4,14 @@ name: CLI binary
 # round-trip checks can run on drawings that must not be uploaded to this public repository.
 on:
   push:
-    branches: [main]
+    branches: [main, 'exp/**']
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: cli-binary
+  group: cli-binary-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,18 +31,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: cli-release
+      # Experiment branches named exp/acadrust-X.Y.Z try that acadrust release.
+      - name: Try another acadrust (exp/acadrust-* branches)
+        if: startsWith(github.ref_name, 'exp/acadrust-')
+        run: |
+          v="${GITHUB_REF_NAME#exp/acadrust-}"
+          cargo update -p acadrust --precise "$v"
+          grep -A3 'name = "acadrust"' Cargo.lock
       - name: cargo build --release -p cadcraft-cli
-        run: cargo build --locked --release -p cadcraft-cli
+        run: |
+          if [[ "$GITHUB_REF_NAME" == exp/acadrust-* ]]; then cargo build --release -p cadcraft-cli; else cargo build --locked --release -p cadcraft-cli; fi
       - name: Publish on ci-bin
         run: |
           set -e
           mkdir -p /tmp/bin && cp target/release/cadcraft-cli /tmp/bin/
           strip /tmp/bin/cadcraft-cli || true
+          cp Cargo.lock /tmp/bin/Cargo.lock
           cd /tmp/bin
           echo "${GITHUB_SHA}" > SOURCE_COMMIT
-          git init -q -b ci-bin
+          branch=ci-bin
+          if [[ "$GITHUB_REF_NAME" != main ]]; then branch="ci-bin-${GITHUB_REF_NAME//\//-}"; fi
+          git init -q -b "$branch"
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-          git add cadcraft-cli SOURCE_COMMIT
+          git add cadcraft-cli SOURCE_COMMIT Cargo.lock
           git commit -q -m "cadcraft-cli for ${GITHUB_SHA}"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" ci-bin
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
