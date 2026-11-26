@@ -87,16 +87,18 @@ mod ink {
 /// auto-hide strip ranks these by use, ties keeping this order.
 const QUICK_CATALOG: &[(&str, &str, Glyph)] = &[
     ("line", "Line", Glyph::Line),
+    ("pline", "Polyline", Glyph::Polyline),
     ("circle", "Circle", Glyph::Circle),
     ("rectang", "Rectangle", Glyph::Rectangle),
     ("arc", "Arc", Glyph::Arc),
     ("move", "Move", Glyph::Move),
     ("copy", "Copy", Glyph::Copy),
+    ("rotate", "Rotate", Glyph::Rotate),
     ("erase", "Erase", Glyph::Erase),
     ("select", "Select", Glyph::Select),
     ("zoom.extents", "Zoom extents", Glyph::ZoomExtents),
-    ("zoom.previous", "Zoom previous", Glyph::Undo),
-    ("pan", "Pan", Glyph::Move),
+    ("zoom.previous", "Zoom previous", Glyph::ZoomPrevious),
+    ("pan", "Pan", Glyph::Pan),
     ("u", "Undo", Glyph::Undo),
     ("redo", "Redo", Glyph::Redo),
     ("new", "New drawing", Glyph::New),
@@ -106,19 +108,6 @@ const QUICK_CATALOG: &[(&str, &str, Glyph)] = &[
     ("plot", "Plot / PDF", Glyph::Plot),
     ("layout", "New layout", Glyph::Layout),
     ("regen", "Regenerate", Glyph::Regen),
-];
-
-/// Drawing tools of the main tool bar: icon, stroke width, command, tooltip.
-const TOOLS: &[(Glyph, f32, &str, &str)] = &[
-    (Glyph::Select, 1.0, "select", "Select objects"),
-    (Glyph::Line, 1.5, "line", "Draw line"),
-    (Glyph::Circle, 1.35, "circle", "Draw circle"),
-    (Glyph::Arc, 1.35, "arc", "Draw arc (ARC)"),
-    (Glyph::Polyline, 1.35, "pline", "Draw connected line segments"),
-    (Glyph::Rectangle, 1.35, "rectang", "Draw rectangle (RECTANGLE)"),
-    (Glyph::Move, 1.2, "move", "Move selected objects (MOVE)"),
-    (Glyph::Trim, 1.2, "trim", "Trim objects"),
-    (Glyph::Dimension, 1.2, "dimlinear", "Add dimension"),
 ];
 
 /// Shell state kept by [`CadApp`].
@@ -318,19 +307,43 @@ pub fn title_bar(app: &mut CadApp, ui: &mut egui::Ui) {
     });
 }
 
-/// iStCAD's logo (an isometric cube on a rounded tile), 30 points.
-fn paint_logo(p: &egui::Painter, rect: Rect, t: Tokens) {
-    let s = rect.width() / 32.0;
+/// iStCAD 1.0.233's logo, 30 points: an orange tile (`#D5572B` to `#AA3811`, top to bottom) with
+/// a light inner frame, and in white the isometric cube with an "i", an "S" and a pale dot.
+fn paint_logo(p: &egui::Painter, rect: Rect, _t: Tokens) {
+    let s = rect.width() / 256.0;
     let at = |x: f32, y: f32| pos2(rect.left() + x * s, rect.top() + y * s);
-    p.rect(rect, 6.0 * s, Color32::from_rgb(0x20, 0x28, 0x32), Stroke::new(1.0, Color32::from_rgb(0x5e, 0x6a, 0x75)), egui::StrokeKind::Inside);
-    let teal = Stroke::new(1.65 * s, t.icon_accent);
-    p.add(egui::Shape::closed_line(vec![at(6.0, 8.0), at(16.0, 3.0), at(26.0, 8.0), at(26.0, 21.0), at(16.0, 27.0), at(6.0, 21.0)], teal));
-    p.line(vec![at(6.0, 8.0), at(16.0, 14.0), at(26.0, 8.0)], teal);
-    p.line_segment([at(16.0, 14.0), at(16.0, 27.0)], teal);
-    let white = Stroke::new(1.3 * s, t.text);
-    p.line(vec![at(11.0, 11.0), at(16.0, 14.0), at(21.0, 11.0)], white);
-    p.line_segment([at(16.0, 14.0), at(16.0, 21.0)], white);
-    p.circle_filled(at(26.3, 5.7), 1.7 * s, t.icon_point);
+    // The gradient tile: rounded, filled in horizontal bands from the top colour to the bottom one.
+    let tile = Rect::from_min_max(at(8.0, 8.0), at(248.0, 248.0));
+    let (top, bottom) = ([0xd5_u8, 0x57, 0x2b], [0xaa_u8, 0x38, 0x11]);
+    let bands = 12;
+    let clip = p.with_clip_rect(tile);
+    for i in 0..bands {
+        let f = i as f32 / (bands - 1) as f32;
+        let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * f).round() as u8;
+        let c = Color32::from_rgb(mix(top[0], bottom[0]), mix(top[1], bottom[1]), mix(top[2], bottom[2]));
+        let y0 = tile.top() + tile.height() * i as f32 / bands as f32;
+        let y1 = tile.top() + tile.height() * (i + 1) as f32 / bands as f32;
+        let band = Rect::from_min_max(pos2(tile.left(), y0), pos2(tile.right(), y1 + 0.5));
+        // Each band is the tile's rounded shape cut to the band, so the corners stay round.
+        clip.with_clip_rect(band).rect_filled(tile, 58.0 * s, c);
+    }
+    p.rect_stroke(Rect::from_min_max(at(24.0, 24.0), at(232.0, 232.0)), 44.0 * s, Stroke::new(5.0 * s, Color32::from_white_alpha(0x8c)), egui::StrokeKind::Middle);
+    // The mark, scaled 0.82 about the tile's centre.
+    let m = |x: f32, y: f32| at(128.0 + (x - 128.0) * 0.82, 128.0 + (y - 128.0) * 0.82);
+    let white = |w: f32| Stroke::new(w * 0.82 * s, Color32::WHITE);
+    p.add(egui::Shape::closed_line(vec![m(128.0, 34.0), m(208.0, 78.0), m(208.0, 176.0), m(128.0, 222.0), m(48.0, 176.0), m(48.0, 78.0)], white(13.0)));
+    p.line(vec![m(48.0, 78.0), m(128.0, 126.0), m(208.0, 78.0)], white(13.0));
+    p.line_segment([m(128.0, 126.0), m(128.0, 222.0)], white(13.0));
+    p.line_segment([m(88.0, 142.0), m(88.0, 184.0)], white(14.0));
+    for (a, b, c, d) in [((184.0, 130.0), (158.0, 124.0), (148.0, 146.0), (167.0, 156.0)), ((167.0, 156.0), (186.0, 166.0), (178.0, 188.0), (151.0, 184.0))] {
+        p.add(egui::epaint::CubicBezierShape::from_points_stroke(
+            [m(a.0, a.1), m(b.0, b.1), m(c.0, c.1), m(d.0, d.1)],
+            false,
+            Color32::TRANSPARENT,
+            white(12.0),
+        ));
+    }
+    p.circle_filled(m(88.0, 116.0), 11.0 * 0.82 * s, Color32::from_rgb(0xff, 0xe2, 0xa6));
 }
 
 /// "IST_CADCraft" (14 pt) and " v1.0.0" (9 pt, `#A7AEB8`): centred on the bar `bar`, kept
@@ -367,12 +380,13 @@ fn title_left_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     paint_logo(ui.painter(), logo, t);
     ui.add_space(8.0);
     let mut run = None;
-    // Undo/Redo: 18-point paths in a 21-unit box, 1.5-point strokes.
-    let soft = |g| look(g, ink::ICON_SOFT, 1.5 * 24.0 / 21.0, 18.0);
-    if icon_button(ui, vec2(26.0, 26.0), soft(Glyph::Undo), "Undo", false).clicked() {
+    // iStCAD 1.0.233: 28-point buttons, 24-unit paths fitted to 18 points, 1.9-unit `#D9DCE2` strokes.
+    let soft = |g| look(g, ink::ICON_SOFT, 1.9, 18.0);
+    if icon_button(ui, vec2(28.0, 28.0), soft(Glyph::Undo), "Undo", false).clicked() {
         run = Some("u");
     }
-    if icon_button(ui, vec2(26.0, 26.0), soft(Glyph::Redo), "Redo", false).clicked() {
+    ui.add_space(2.0);
+    if icon_button(ui, vec2(28.0, 28.0), soft(Glyph::Redo), "Redo", false).clicked() {
         run = Some("redo");
     }
     ui.add_space(6.0);
@@ -383,10 +397,10 @@ fn title_left_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
         (Glyph::Save, "qsave", "Save drawing (Ctrl+S)"),
         (Glyph::SaveAs, "saveas", "Save drawing as a new file"),
     ] {
-        // 24-unit paths fitted to 18 points with 1.65-unit strokes.
-        if icon_button(ui, vec2(29.0, 29.0), look(glyph, ink::ICON_BRIGHT, 1.65, 18.0), tip, false).clicked() {
+        if icon_button(ui, vec2(28.0, 28.0), soft(glyph), tip, false).clicked() {
             run = Some(cmd);
         }
+        ui.add_space(2.0);
     }
     ui.add_space(5.0);
     rule(ui, 22.0, 0.0);
@@ -423,17 +437,36 @@ fn menu_entries(menu: &str) -> Vec<(&'static str, &'static str)> {
 /// Minimize, Maximize/Restore and Close (42 points wide each), for a window without an OS frame.
 fn window_buttons(ui: &mut egui::Ui) {
     let maximized = ui.input(|i| i.viewport().maximized).unwrap_or(false);
-    if text_button(ui, vec2(42.0, 40.0), "×", 28.0, "Close").clicked() {
+    if caption_button(ui, 48.0, "×", 27.0, "Close", true).clicked() {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
     }
-    let (glyph, tip) = if maximized { ("❐", "Restore") } else { ("□", "Maximize") };
-    if text_button(ui, vec2(42.0, 40.0), glyph, 21.0, tip).clicked() {
+    let (glyph, tip) = if maximized { ("❐", "Restore") } else { ("▢", "Maximize") };
+    if caption_button(ui, 46.0, glyph, 17.0, tip, false).clicked() {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }
-    if text_button(ui, vec2(42.0, 40.0), "—", 16.0, "Minimize").clicked() {
+    if caption_button(ui, 46.0, "─", 12.0, "Minimize", false).clicked() {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
     }
     ui.add_space(8.0);
+}
+
+/// iStCAD's caption buttons (`CadCaptionButton`, 46 × 30; Close 48): `#F3F5F8` glyph, `#36414E`
+/// under the pointer, `#606B7A` pressed; Close turns `#C42B28` (`#9F211F` pressed).
+fn caption_button(ui: &mut egui::Ui, width: f32, glyph: &str, size: f32, tip: &str, close: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
+    let fill = match (close, resp.is_pointer_button_down_on(), resp.hovered()) {
+        (true, true, _) => Some(Color32::from_rgb(0x9f, 0x21, 0x1f)),
+        (true, false, true) => Some(Color32::from_rgb(0xc4, 0x2b, 0x28)),
+        (false, true, _) => Some(Color32::from_rgb(0x60, 0x6b, 0x7a)),
+        (false, false, true) => Some(Color32::from_rgb(0x36, 0x41, 0x4e)),
+        _ => None,
+    };
+    if let Some(f) = fill {
+        ui.painter().rect_filled(rect, 0.0, f);
+    }
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, FontId::proportional(size), Color32::from_rgb(0xf3, 0xf5, 0xf8));
+    crate::icons::describe_control(ui, &resp, tip, None, false);
+    resp.on_hover_text(crate::i18n::t(tip))
 }
 
 /// Commands whose name, label or alias contains `query`, best matches first.
@@ -468,16 +501,17 @@ pub fn search_commands(query: &str) -> Vec<(&'static str, &'static str)> {
 fn search_box(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
     let (host, _) = ui.allocate_exact_size(vec2(218.0, 34.0), Sense::hover());
     ui.painter().rect_filled(host, 5.0, ink::FIELD);
-    let lens = Rect::from_center_size(pos2(host.left() + 22.0, host.center().y), vec2(18.0, 18.0));
-    glyphs::paint(ui.painter(), lens, Glyph::ZoomExtents, t.text_dim, 1.6);
-    let field = Rect::from_min_max(pos2(host.left() + 40.0, host.top() + 4.0), pos2(host.right() - 10.0, host.bottom() - 4.0));
+    // iStCAD 1.0.233's "iA" assistant mark (its orange tile) before the field.
+    let mark = Rect::from_center_size(pos2(host.left() + 23.0, host.center().y), vec2(22.0, 22.0));
+    paint_logo(ui.painter(), mark, t);
+    let field = Rect::from_min_max(pos2(host.left() + 43.0, host.top() + 4.0), pos2(host.right() - 10.0, host.bottom() - 4.0));
     let edit = egui::TextEdit::singleline(&mut app.istcad.search)
-        .hint_text(crate::tl!("Search..."))
+        .hint_text(crate::tl!("AI Assistant..."))
         .frame(egui::Frame::NONE)
         .text_color(ink::LABEL)
         .desired_width(field.width())
         .align(egui::Align2::LEFT_CENTER);
-    let resp = ui.put(field, edit).on_hover_text(crate::tl!("Search commands and tools"));
+    let resp = ui.put(field, edit).on_hover_text(crate::tl!("AI Assistant - search commands and tools"));
     let hits = search_commands(&app.istcad.search);
     let mut run = None;
     if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -572,16 +606,10 @@ pub fn main_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
     egui::Panel::top("ist_toolbar").exact_size(TOOLBAR_H).frame(frame).show(ui, |ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.horizontal_centered(|ui| {
+            // iStCAD 1.0.233 dropped the drawing-tool strip: the commands are on the command line
+            // and the edge toolbar. The row holds the five style combos.
             pickers(app, ui, t);
-            rule(ui, 30.0, 8.0);
-            // The running command's tool is highlighted; Select when nothing runs.
-            let running = app.session.running.as_ref().map(|r| r.id.clone()).unwrap_or_else(|| "select".into());
             let mut run = None;
-            for (glyph, width, cmd, tip) in TOOLS {
-                if icon_button(ui, vec2(38.0, 36.0), look(*glyph, ink::ICON, *width, 22.0), tip, running == *cmd).clicked() {
-                    run = Some(*cmd);
-                }
-            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(3.0);
                 if icon_button(ui, vec2(38.0, 36.0), look(Glyph::Preferences, ink::ICON, 1.3, 22.0), "Preferences", false).clicked() {
@@ -598,93 +626,260 @@ pub fn main_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
     });
 }
 
-/// One picker of the main tool bar.
-struct Picker<'a> {
+/// One entry of a style combo: what a pick passes on, what it shows, and a colour swatch.
+struct Choice {
+    key: String,
+    label: String,
+    swatch: Option<Color32>,
+}
+
+impl Choice {
+    fn named(name: &str) -> Choice {
+        Choice { key: name.to_string(), label: name.to_string(), swatch: None }
+    }
+}
+
+/// One style combo of the main tool bar.
+struct Picker {
     label: &'static str,
+    /// Space before the label (iStCAD's margins differ per combo).
+    lead: f32,
     id: &'static str,
-    items: &'a [String],
-    current: &'a str,
-    width: f32,
-    command: &'static str,
+    choices: Vec<Choice>,
+    /// The key shown; `None` when the selected objects differ (the box is blank, as in AutoCAD).
+    current: Option<String>,
+    /// The command that opens the manager ("Create / Modify...").
+    manage: &'static str,
     tip: &'static str,
 }
 
-/// Text Style, Dim Style and Layer: a label and a `ComboLike` box each. The box lists the
-/// drawing's table; a pick becomes current.
+/// What a combo was asked to do.
+enum Picked {
+    Choice(String),
+    Manage(&'static str),
+}
+
+/// The colour a swatch shows for `c` (ByLayer and ByBlock: the layer's, white).
+fn swatch(c: cadcraft_color::Color, layer: cadcraft_color::Color) -> Color32 {
+    let rgb = c.resolve(layer, cadcraft_color::Color::Index(7));
+    Color32::from_rgb(rgb.0, rgb.1, rgb.2)
+}
+
+/// The value the selected objects share for `f`, `Some(None)` when they differ, `None` with
+/// nothing selected (iStCAD's combos then show the current settings).
+fn shared<T: PartialEq + Clone>(d: &cadcraft_doc::Drawing, sel: &[cadcraft_doc::Handle], f: impl Fn(&cadcraft_doc::Common) -> T) -> Option<Option<T>> {
+    // A very large selection is not scanned (iStCAD stops at 2,000 objects).
+    if sel.is_empty() || sel.len() > 2000 {
+        return None;
+    }
+    let mut values = sel.iter().filter_map(|h| d.entity(*h)).map(|e| f(&e.common));
+    let first = values.next()?;
+    Some(values.all(|v| v == first).then_some(first))
+}
+
+/// Text Style, Dim Style, Layer, Color and Line Style, as iStCAD 1.0.233 lays them out. With
+/// objects selected, Layer, Color and Line Style show the objects' values (blank when they
+/// differ) and a pick changes the objects; otherwise a pick sets the current value. Each list
+/// starts with "Create / Modify...", which opens the manager.
 fn pickers(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
-    let doc = app.session.doc().ok();
-    let text_styles: Vec<String> = doc.map(|d| d.text_styles.iter().map(|s| s.name.clone()).collect()).unwrap_or_default();
-    let dim_styles: Vec<String> = doc.map(|d| d.dim_styles.iter().map(|s| s.name.clone()).collect()).unwrap_or_default();
-    let layers: Vec<String> = doc.map(|d| d.layers.iter().map(|l| l.name.clone()).collect()).unwrap_or_default();
-    // With no drawing open the boxes show iStCAD's placeholders.
-    let cur_text = doc.map_or_else(|| "Standard".to_string(), |d| d.header.str("TEXTSTYLE", "Standard"));
-    let cur_dim = doc.map_or_else(|| "ISO-25".to_string(), |d| d.header.str("DIMSTYLE", "Standard"));
-    let cur_layer = doc.map_or_else(|| "ByLayer".to_string(), |d| d.header.str("CLAYER", "0"));
+    use cadcraft_color::Color;
+    let Some(d) = app.session.doc().ok() else {
+        // No drawing: iStCAD's placeholders, nothing to pick.
+        for (label, lead, value) in [("Text Style", 3.0, "Standard"), ("Dim Style", 3.0, "ISO-25"), ("Layer", 3.0, "0"), ("Color", 4.0, "ByLayer"), ("Line Style", 9.0, "ByLayer")] {
+            let p = Picker { label, lead, id: label, choices: Vec::new(), current: Some(value.into()), manage: "", tip: "" };
+            let _ = combo(ui, &p, t);
+        }
+        return;
+    };
+    let sel: Vec<cadcraft_doc::Handle> = app.session.state().map(|st| st.selection.clone()).unwrap_or_default();
+    let has_sel = !sel.is_empty();
+    let cur_layer = d.header.str("CLAYER", "0");
+    let layer_of = |name: &str| d.layer(name).map_or(Color::Index(7), |l| l.color);
+    let sel_layer = shared(d, &sel, |c| c.layer.clone());
+    let sel_color = shared(d, &sel, |c| c.color);
+    let sel_ltype = shared(d, &sel, |c| c.linetype.clone());
+    // ByLayer shows the layer in question: the selection's when it has one, else the current one.
+    let swatch_layer = match &sel_layer {
+        Some(Some(l)) => l.clone(),
+        _ => cur_layer.clone(),
+    };
+    let layer_color = layer_of(&swatch_layer);
+    let layer_ltype = d.layer(&swatch_layer).map_or_else(|| "Continuous".to_string(), |l| l.linetype.clone());
+
+    let layers: Vec<Choice> = d.layers.iter().map(|l| Choice { key: l.name.clone(), label: l.name.clone(), swatch: Some(swatch(l.color, l.color)) }).collect();
+    let cur_color = match &sel_color {
+        Some(c) => *c,
+        None => Some(Color::from_aci(d.header.i64("CECOLOR", 256) as i16)),
+    };
+    let mut colors: Vec<Choice> = [Color::ByLayer, Color::ByBlock]
+        .into_iter()
+        .chain((1..=7).map(Color::Index))
+        .map(|c| Choice { key: c.name(), label: c.name(), swatch: Some(swatch(c, layer_color)) })
+        .collect();
+    if let Some(c) = cur_color
+        && !colors.iter().any(|x| x.key == c.name())
+    {
+        colors.push(Choice { key: c.name(), label: c.name(), swatch: Some(swatch(c, layer_color)) });
+    }
+    let mut ltypes = vec![Choice { key: "ByLayer".into(), label: format!("ByLayer ({layer_ltype})"), swatch: None }, Choice::named("ByBlock")];
+    ltypes.extend(d.linetypes.iter().filter(|l| !l.name.eq_ignore_ascii_case("ByLayer") && !l.name.eq_ignore_ascii_case("ByBlock")).map(|l| Choice::named(&l.name)));
+    let cur_ltype = match &sel_ltype {
+        Some(l) => l.clone(),
+        None => Some(d.header.str("CELTYPE", "ByLayer")),
+    };
     let all = [
         Picker {
             label: "Text Style",
+            lead: 3.0,
             id: "ist_textstyle",
-            items: &text_styles,
-            current: &cur_text,
-            width: 112.0,
-            command: "style.current",
+            choices: d.text_styles.iter().map(|s| Choice::named(&s.name)).collect(),
+            current: Some(d.header.str("TEXTSTYLE", "Standard")),
+            manage: "style",
             tip: "Choose text style",
         },
         Picker {
             label: "Dim Style",
+            lead: 3.0,
             id: "ist_dimstyle",
-            items: &dim_styles,
-            current: &cur_dim,
-            width: 96.0,
-            command: "dimstyle.current",
+            choices: d.dim_styles.iter().map(|s| Choice::named(&s.name)).collect(),
+            current: Some(d.header.str("DIMSTYLE", "Standard")),
+            manage: "dimstyle",
             tip: "Choose dimension style",
         },
         Picker {
             label: "Layer",
+            lead: 3.0,
             id: "ist_layer",
-            items: &layers,
-            current: &cur_layer,
-            width: 104.0,
-            command: "layer.current",
-            tip: "Choose current layer",
+            choices: layers,
+            current: match sel_layer {
+                Some(l) => l,
+                None => Some(cur_layer.clone()),
+            },
+            manage: "ui.dialog.layers",
+            tip: if has_sel { "Layer of the selected objects" } else { "Choose current layer" },
+        },
+        Picker {
+            label: "Color",
+            lead: 4.0,
+            id: "ist_color",
+            choices: colors,
+            current: cur_color.map(|c| c.name()),
+            manage: "color",
+            tip: if has_sel { "Color of the selected objects" } else { "Choose current color" },
+        },
+        Picker {
+            label: "Line Style",
+            lead: 9.0,
+            id: "ist_linestyle",
+            choices: ltypes,
+            current: cur_ltype,
+            manage: "linetype",
+            tip: if has_sel { "Linetype of the selected objects" } else { "Choose current linetype" },
         },
     ];
-    let mut pick: Option<(&str, String)> = None;
+    let mut pick: Option<(&str, Picked)> = None;
     for picker in &all {
-        if let Some(name) = picker_box(ui, picker, t) {
-            pick = Some((picker.command, name));
+        if let Some(p) = combo(ui, picker, t) {
+            pick = Some((picker.id, p));
         }
     }
-    if let Some((cmd, name)) = pick {
-        let _ = app.run(cmd, json!({ "name": name }));
+    match pick {
+        Some((_, Picked::Manage(cmd))) => app.start(cmd),
+        Some((id, Picked::Choice(key))) => {
+            let r = match (id, has_sel) {
+                ("ist_textstyle", _) => app.run("style.current", json!({ "name": key })),
+                ("ist_dimstyle", _) => app.run("dimstyle.current", json!({ "name": key })),
+                ("ist_layer", true) => app.run("properties.set", json!({ "layer": key })),
+                ("ist_layer", false) => app.run("layer.current", json!({ "name": key })),
+                ("ist_color", true) => app.run("properties.set", json!({ "color": key })),
+                ("ist_color", false) => app.run("color", json!({ "color": key })),
+                ("ist_linestyle", true) => app.run("properties.set", json!({ "linetype": key })),
+                _ => app.run("linetype", json!({ "current": key })),
+            };
+            if let Err(e) = r {
+                app.set_status(e);
+            }
+        }
+        None => {}
     }
 }
 
-/// One `ComboLike` picker: `#343A43`, `#555B65` border, radius 3, the value and "⌄". Returns the
-/// name picked from its list, if another one was.
-fn picker_box(ui: &mut egui::Ui, picker: &Picker, t: Tokens) -> Option<String> {
-    ui.add_space(3.0);
-    ui.label(RichText::new(crate::i18n::t(picker.label)).size(13.0).color(ink::LABEL));
-    ui.add_space(8.0);
-    let (rect, resp) = ui.allocate_exact_size(vec2(picker.width, 30.0), Sense::click());
-    let fill = if resp.hovered() { t.control } else { ink::COMBO };
-    ui.painter().rect(rect, 3.0, fill, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-    let p = ui.painter().with_clip_rect(rect.shrink(1.0));
-    p.text(pos2(rect.left() + 9.0, rect.center().y), Align2::LEFT_CENTER, picker.current, FontId::proportional(13.0), t.text);
-    p.text(pos2(rect.right() - 9.0, rect.center().y - 2.0), Align2::RIGHT_CENTER, "⌄", FontId::proportional(13.0), t.text);
+/// iStCAD's dark combo (`CadDarkCombo`, 148 × 28): face `#56637A`, border `#77869B`, `#263443`
+/// under the pointer, the value in white and a small down triangle. Its list (`#394657`, border
+/// `#8191A4`) starts with the "Create / Modify..." action, then the choices (`#414D60`, `#263443`
+/// under the pointer, `#334B64` for the current one), colours with a 16-point swatch.
+fn combo(ui: &mut egui::Ui, picker: &Picker, t: Tokens) -> Option<Picked> {
+    const FACE: Color32 = Color32::from_rgb(0x56, 0x63, 0x7a);
+    const EDGE: Color32 = Color32::from_rgb(0x77, 0x86, 0x9b);
+    const HOVER: Color32 = Color32::from_rgb(0x26, 0x34, 0x43);
+    const LIST: Color32 = Color32::from_rgb(0x39, 0x46, 0x57);
+    const LIST_EDGE: Color32 = Color32::from_rgb(0x81, 0x91, 0xa4);
+    const ITEM: Color32 = Color32::from_rgb(0x41, 0x4d, 0x60);
+    const ITEM_ON: Color32 = Color32::from_rgb(0x33, 0x4b, 0x64);
+    const ACTION: Color32 = Color32::from_rgb(0x47, 0x5d, 0x76);
+    const SWATCH_EDGE: Color32 = Color32::from_rgb(0xd5, 0xe0, 0xec);
+    ui.add_space(picker.lead);
+    ui.label(RichText::new(crate::i18n::t(picker.label)).size(12.5).color(ink::LABEL));
+    ui.add_space(if picker.lead > 3.0 { 5.0 } else { 8.0 });
+    let (rect, resp) = ui.allocate_exact_size(vec2(148.0, 28.0), Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Id::unique(picker.id));
+    let face = if resp.hovered() || open { HOVER } else { FACE };
+    ui.painter().rect(rect, 1.0, face, Stroke::new(1.0, if open { Color32::from_rgb(0xa4, 0xbb, 0xd4) } else { EDGE }), egui::StrokeKind::Inside);
+    let p = ui.painter().with_clip_rect(rect.shrink2(vec2(5.0, 1.0)));
+    let mut x = rect.left() + 6.0;
+    let shown = picker.current.as_deref().and_then(|k| picker.choices.iter().find(|c| c.key.eq_ignore_ascii_case(k)));
+    if let Some(sw) = shown.and_then(|c| c.swatch) {
+        let r = Rect::from_center_size(pos2(x + 7.0, rect.center().y), vec2(14.0, 14.0));
+        p.rect(r, 1.0, sw, Stroke::new(1.0, SWATCH_EDGE), egui::StrokeKind::Inside);
+        x += 20.0;
+    }
+    let text = shown.map(|c| c.label.clone()).or_else(|| picker.current.clone()).unwrap_or_default();
+    p.text(pos2(x, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(12.5), Color32::WHITE);
+    let tri = pos2(rect.right() - 12.0, rect.center().y);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![tri + vec2(-3.5, -2.0), tri + vec2(3.5, -2.0), tri + vec2(0.0, 2.5)],
+        Color32::from_rgb(0xf0, 0xf4, 0xf9),
+        Stroke::NONE,
+    ));
     crate::icons::describe_control(ui, &resp, picker.label, None, false);
-    let resp = resp.on_hover_text(crate::i18n::t(picker.tip));
+    let resp = if picker.tip.is_empty() { resp } else { resp.on_hover_text(crate::i18n::t(picker.tip)) };
     let mut picked = None;
-    egui::Popup::menu(&resp).id(egui::Id::unique(picker.id)).show(|ui| {
-        ui.set_min_width(picker.width);
-        if picker.items.is_empty() {
-            ui.label(RichText::new(crate::tl!("No drawing open")).color(t.text_dim));
+    if picker.choices.is_empty() && picker.manage.is_empty() {
+        ui.add_space(8.0);
+        return None;
+    }
+    egui::Popup::menu(&resp).id(egui::Id::unique(picker.id)).frame(egui::Frame::NONE.fill(LIST).stroke(Stroke::new(1.0, LIST_EDGE)).inner_margin(2)).show(|ui| {
+        ui.set_min_width(146.0);
+        ui.spacing_mut().item_spacing.y = 0.0;
+        if !picker.manage.is_empty() {
+            let (r, a) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::click());
+            ui.painter().rect_filled(r, 0.0, if a.hovered() { HOVER } else { ACTION });
+            ui.painter().line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, Color32::from_rgb(0x7c, 0x92, 0xa8)));
+            ui.painter().text(r.center(), Align2::CENTER_CENTER, crate::tl!("Create / Modify..."), FontId::proportional(12.5), Color32::WHITE);
+            crate::icons::describe_control(ui, &a, "Create / Modify...", None, false);
+            if a.on_hover_text(crate::tl!("Open the manager; does not select an item")).clicked() {
+                picked = Some(Picked::Manage(picker.manage));
+                ui.close();
+            }
+            ui.add_space(3.0);
         }
-        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-            for name in picker.items {
-                if ui.add(egui::Button::selectable(name == picker.current, name.as_str())).clicked() {
-                    if name != picker.current {
-                        picked = Some(name.clone());
+        egui::ScrollArea::vertical().max_height(286.0).show(ui, |ui| {
+            for c in &picker.choices {
+                let current = picker.current.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(&c.key));
+                let (r, item) = ui.allocate_exact_size(vec2(ui.available_width(), 25.0), Sense::click());
+                let fill = if item.hovered() { HOVER } else if current { ITEM_ON } else { ITEM };
+                ui.painter().rect_filled(r, 0.0, fill);
+                let mut x = r.left() + 8.0;
+                if let Some(sw) = c.swatch {
+                    let s = Rect::from_center_size(pos2(x + 8.0, r.center().y), vec2(16.0, 16.0));
+                    ui.painter().rect(s, 1.0, sw, Stroke::new(1.0, SWATCH_EDGE), egui::StrokeKind::Inside);
+                    x += 22.0;
+                }
+                ui.painter().with_clip_rect(r).text(pos2(x, r.center().y), Align2::LEFT_CENTER, &c.label, FontId::proportional(12.5), Color32::from_rgb(0xf3, 0xf6, 0xfb));
+                crate::icons::describe_control(ui, &item, &c.label, None, false);
+                if item.clicked() {
+                    if !current {
+                        picked = Some(Picked::Choice(c.key.clone()));
                     }
                     ui.close();
                 }
@@ -692,6 +887,7 @@ fn picker_box(ui: &mut egui::Ui, picker: &Picker, t: Tokens) -> Option<String> {
         });
     });
     ui.add_space(8.0);
+    let _ = t;
     picked
 }
 

@@ -60,7 +60,7 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
     };
     h.run_steps(6);
     let shown = painted(&h);
-    for label in ["Text Style", "Dim Style", "Layer", "Command:", "Model"] {
+    for label in ["Text Style", "Dim Style", "Layer", "Color", "Line Style", "Command:", "Model"] {
         assert!(shown.iter().any(|t| t.contains(label)), "the iStCAD window doesn't show {label:?}: {shown:?}");
     }
     // CADCraft's menus are in the title bar, folded into seven: no second menu row, and the
@@ -78,7 +78,10 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
     let _ = h.state_mut().run("selectall", json!({}));
     let _ = h.state_mut().run("ui.istcad.properties", json!({ "on": true }));
     h.run_steps(4);
-    assert!(painted(&h).iter().any(|t| t == "Properties"), "Ctrl+1 shows the Properties palette");
+    let shown = painted(&h);
+    for group in ["PROPERTIES", "General", "Misc"] {
+        assert!(shown.iter().any(|t| t == group), "Ctrl+1 shows the Properties palette with {group:?}: {shown:?}");
+    }
     save(&mut h, "02-properties");
     let _ = h.state_mut().run("ui.istcad.properties", json!({ "on": false }));
     let _ = h.state_mut().run("select", json!({ "clear": true }));

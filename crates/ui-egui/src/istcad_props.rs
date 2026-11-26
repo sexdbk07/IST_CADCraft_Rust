@@ -1,14 +1,14 @@
 //! iStCAD's Properties palette (Ctrl+1): a 296-point column on the right of the drawing area,
 //! hidden until asked for, as iStCAD's `PropertiesPanel` is.
 //!
-//! Layout (iStCAD `MainWindow.xaml`): `#363C45`, padding 14; the "Properties" title; the
-//! selection box (`#4A515B`, radius 4: "No selection", the object type or "N objects
-//! selected", ⌄ to limit the rows to one type); the General expander, open; then 3D
-//! Visualization, View and Misc. Rows are iStCAD's `AddPropertyRow`: 29 points high, the label
-//! (`#BEC4CD`) in 1 part and the value (`#E1E3E8`, right-aligned) in 1.15 parts.
+//! Layout (iStCAD 1.0.233 `MainWindow.xaml`): `#313741`, padding 6, its left edge dragged to
+//! resize; the "PROPERTIES" title; the selection box ("No selection", the object type or "N
+//! objects selected", ⌄ to limit the rows to one type); then the groups General, Geometry,
+//! Text, View (closed) and Misc, each under a 24-point `#262B33` header bar with ◀ / ▼. Rows: the
+//! label (`#BEC4CD`) in 1 part and the value (`#E1E3E8`, right-aligned) in 1.15 parts.
 //!
-//! General follows iStCAD's order: Count, Type, Layer, Color, then (one object) Handle and the
-//! object's geometry, then Linetype and Lineweight. The values come from the engine's
+//! General follows iStCAD's order: Count, Type, Layer, Color, (one object) Handle, Linetype and
+//! Lineweight; one object's geometry is under Geometry. The values come from the engine's
 //! `properties.describe` and are changed through `properties.set` (geometry through the same
 //! keys CADCraft's palette uses), so the palette edits what iStCAD's only showed: click a value
 //! to type a new one (Enter applies, Esc cancels) or to pick from its list.
@@ -24,11 +24,14 @@ use crate::theme::Tokens;
 
 /// Width of the palette column (iStCAD's `PropertiesColumn` when shown).
 pub const WIDTH: f32 = 296.0;
-const ROW_H: f32 = 29.0;
+const ROW_H: f32 = 30.0;
+/// iStCAD 1.0.233's palette fill (`#313741`) and group header bar (`#262B33`, `#4A525E` rule).
+const PANEL_FILL: Color32 = Color32::from_rgb(0x31, 0x37, 0x41);
+const GROUP_FILL: Color32 = Color32::from_rgb(0x26, 0x2b, 0x33);
+const GROUP_RULE: Color32 = Color32::from_rgb(0x4a, 0x52, 0x5e);
 const LABEL_INK: Color32 = Color32::from_rgb(190, 196, 205);
 const VALUE_INK: Color32 = Color32::from_rgb(225, 227, 232);
 const HEADER_INK: Color32 = Color32::from_rgb(0xe4, 0xe9, 0xea);
-const RULE_INK: Color32 = Color32::from_rgb(0x53, 0x5a, 0x64);
 const BOX_FILL: Color32 = Color32::from_rgb(0x4a, 0x51, 0x5b);
 
 /// What applying a typed number changes.
@@ -108,13 +111,14 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
         return;
     }
     let t = Tokens::get();
-    let frame = egui::Frame::NONE.fill(t.panel).corner_radius(4).inner_margin(egui::Margin::symmetric(14, 0));
-    egui::Panel::right("ist_properties").exact_size(WIDTH).resizable(false).frame(frame).show(ui, |ui| {
+    // iStCAD 1.0.233: `#313741`, padding 6, resizable by dragging its left edge.
+    let frame = egui::Frame::NONE.fill(PANEL_FILL).corner_radius(4).inner_margin(egui::Margin::symmetric(6, 0));
+    egui::Panel::right("ist_properties").default_size(WIDTH).size_range(220.0..=640.0).resizable(true).frame(frame).show(ui, |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.add_space(8.0);
-            let title = ui.add(egui::Label::new(RichText::new(crate::tl!("Properties")).size(14.0).color(t.text)));
+            ui.add_space(6.0);
+            let title = ui.add(egui::Label::new(RichText::new(crate::tl!("PROPERTIES")).size(12.0).strong().color(HEADER_INK)));
             let _ = title.on_hover_text(crate::tl!("Properties palette — Ctrl+1 to show or hide"));
-            ui.add_space(12.0);
+            ui.add_space(6.0);
             let sel = app.session.selection();
             // Everything shown is read from the drawing first, so the rows can then run commands.
             let view = app.session.state().map(|st| st.view()).ok();
@@ -132,7 +136,7 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
             let sections = sections(doc, &handles, view);
             app.istcad.props.filter = filter;
             selection_box(app, ui, &types, sel.len());
-            ui.add_space(12.0);
+            ui.add_space(5.0);
             for section in &sections {
                 section_ui(app, ui, section, &handles);
             }
@@ -205,14 +209,14 @@ fn selection_box(app: &mut CadApp, ui: &mut egui::Ui, types: &[(String, usize)],
 // ---------------------------------------------------------------- rows
 
 /// The palette's sections for `handles`: General, the engine's own groups for text, mtext and
-/// dimensions, then 3D Visualization, View and Misc.
+/// dimensions under Text, then View and Misc.
 fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::View>) -> Vec<Section> {
     let units = Units::of(doc);
     let desc = (!handles.is_empty()).then(|| properties::describe(doc, handles, None));
     let general_rows = desc.as_ref().and_then(|d| d.groups.iter().find(|g| g.name == "General")).map(|g| g.rows.clone()).unwrap_or_default();
     let row = |key: &str| general_rows.iter().find(|r| r.key == key);
     let mut general = Vec::new();
-    let mut three_d = Vec::new();
+    let mut geometry = Vec::new();
     let mut misc = Vec::new();
     if handles.is_empty() {
         // iStCAD shows Type and Layer with nothing selected; the layer here is the current one.
@@ -232,7 +236,7 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
         }
         if let [e] = ents.as_slice() {
             general.push(PropRow::read("Handle", e.handle.hex()));
-            general.extend(geometry_rows(e, &units));
+            geometry.extend(geometry_rows(e, &units));
         }
         if let Some(r) = row("linetype") {
             general.push(from_desc("Linetype", r, linetype_choices(doc)));
@@ -241,7 +245,7 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
             general.push(from_desc("Lineweight", r, Vec::new()));
         }
         let thickness = shared(ents.iter().map(|e| e.common.thickness));
-        three_d.push(match thickness {
+        misc.push(match thickness {
             Some(v) => PropRow::new("Thickness", units.distance(v), Edit::Number(Target::Key("thickness"))),
             None => PropRow::new("Thickness", "Multiple", Edit::Number(Target::Key("thickness"))),
         });
@@ -251,12 +255,13 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
             }
         }
     }
+    // iStCAD 1.0.233's groups: General, Geometry, Text, View (closed) and Misc.
     let mut out = vec![Section { title: "General", open_by_default: true, rows: general }];
-    // Text, MText and Dimension rows, as the engine describes them.
-    for g in desc.iter().flat_map(|d| d.groups.iter()).filter(|g| g.name != "General") {
-        out.push(Section { title: g.name, open_by_default: true, rows: g.rows.iter().map(|r| from_desc(r.label, r, r_choices(r))).collect() });
-    }
-    out.push(Section { title: "3D Visualization", open_by_default: false, rows: three_d });
+    out.push(Section { title: "Geometry", open_by_default: true, rows: geometry });
+    // Text, MText and Dimension rows, as the engine describes them, under Text.
+    let text: Vec<PropRow> =
+        desc.iter().flat_map(|d| d.groups.iter()).filter(|g| g.name != "General").flat_map(|g| g.rows.iter().map(|r| from_desc(r.label, r, r_choices(r)))).collect();
+    out.push(Section { title: "Text", open_by_default: true, rows: text });
     let view_rows = view
         .map(|v| {
             vec![
@@ -267,7 +272,7 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
         })
         .unwrap_or_default();
     out.push(Section { title: "View", open_by_default: false, rows: view_rows });
-    out.push(Section { title: "Misc", open_by_default: false, rows: misc });
+    out.push(Section { title: "Misc", open_by_default: true, rows: misc });
     out
 }
 
@@ -420,27 +425,23 @@ fn polyline_length(pts: &[(f64, f64, f64)], closed: bool) -> f64 {
 fn section_ui(app: &mut CadApp, ui: &mut egui::Ui, s: &Section, handles: &[Handle]) {
     let id = ui.scope_id().with(("ist_prop_section", s.title));
     let open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(s.open_by_default);
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if open { 34.0 } else { 42.0 }), Sense::click());
+    // iStCAD 1.0.233's group header: a 24-point `#262B33` bar with a `#4A525E` rule, the title
+    // semibold, and ◀ (closed) / ▼ (open) at the right.
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
     let p = ui.painter();
-    let c = pos2(rect.left() + 9.0, rect.center().y);
-    p.circle_stroke(c, 8.0, Stroke::new(1.0, if resp.hovered() { HEADER_INK } else { RULE_INK.gamma_multiply(1.6) }));
-    let chevron = if open {
-        vec![pos2(c.x - 3.5, c.y - 1.5), pos2(c.x, c.y + 2.0), pos2(c.x + 3.5, c.y - 1.5)]
-    } else {
-        vec![pos2(c.x - 1.5, c.y - 3.5), pos2(c.x + 2.0, c.y), pos2(c.x - 1.5, c.y + 3.5)]
-    };
-    p.line(chevron, Stroke::new(1.4, HEADER_INK));
-    let title = egui::text::LayoutJob::simple_singleline(crate::i18n::t(s.title).to_string(), FontId::proportional(13.0), HEADER_INK);
-    let g = p.layout_job(title);
-    p.galley(pos2(rect.left() + 24.0, rect.center().y - g.size().y / 2.0), g, HEADER_INK);
-    if !open {
-        p.hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, RULE_INK));
-    }
+    p.rect_filled(rect, 0.0, GROUP_FILL);
+    p.hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, GROUP_RULE));
+    p.text(pos2(rect.left() + 8.0, rect.center().y), Align2::LEFT_CENTER, crate::i18n::t(s.title), FontId::proportional(12.0), Color32::from_rgb(0xf1, 0xf4, 0xf8));
+    let ink = if resp.hovered() { Color32::WHITE } else { Color32::from_rgb(0xc9, 0xcf, 0xd8) };
+    let c = pos2(rect.right() - 12.0, rect.center().y);
+    let chevron = if open { vec![c + vec2(-4.0, -2.5), c + vec2(4.0, -2.5), c + vec2(0.0, 2.5)] } else { vec![c + vec2(2.5, -4.0), c + vec2(2.5, 4.0), c + vec2(-2.5, 0.0)] };
+    p.add(egui::Shape::convex_polygon(chevron, ink, Stroke::NONE));
     crate::icons::describe_control(ui, &resp, s.title, Some(open), false);
     if resp.clicked() {
         ui.data_mut(|d| d.insert_temp(id, !open));
     }
     if !open {
+        ui.add_space(2.0);
         return;
     }
     ui.add_space(4.0);
@@ -451,9 +452,7 @@ fn section_ui(app: &mut CadApp, ui: &mut egui::Ui, s: &Section, handles: &[Handl
     for (i, row) in s.rows.iter().enumerate() {
         row_ui(app, ui, row, &format!("{}:{i}:{}", s.title, row.label), handles);
     }
-    ui.add_space(4.0);
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, RULE_INK));
+    ui.add_space(6.0);
 }
 
 /// One row (iStCAD's `AddPropertyRow`), and its editing.

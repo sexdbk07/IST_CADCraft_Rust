@@ -1,6 +1,7 @@
 //! iStCAD's monochrome line icons, drawn from the path data of iStCAD's own window
-//! (`iStCAD_1/MainWindow.xaml`, iSt Solutions' work), plus a few in the same style for commands
-//! iStCAD shows as text glyphs.
+//! (`iStCAD_1/MainWindow.xaml` 1.0.233, iSt Solutions' work), plus icons in the same style (24-unit
+//! grid, one stroke weight, CAD grips as small squares) for the commands iStCAD shows as text
+//! glyphs on its edge toolbar.
 //!
 //! [`paint`] understands the subset of path syntax those icons use: absolute `M L H V A Z`, with
 //! repeated coordinate pairs after `M`/`L`. Coordinates are in a square box of [`Glyph::box_size`]
@@ -32,6 +33,9 @@ pub enum Glyph {
     Copy,
     Erase,
     ZoomExtents,
+    ZoomPrevious,
+    Pan,
+    Rotate,
     Plot,
     Layout,
     Regen,
@@ -41,7 +45,6 @@ impl Glyph {
     /// The side of the square the path coordinates are given in.
     pub fn box_size(self) -> f32 {
         match self {
-            Glyph::Undo | Glyph::Redo => 21.0,
             Glyph::Menu => 16.0,
             _ => 24.0,
         }
@@ -50,19 +53,22 @@ impl Glyph {
     /// The icon's path data; `None` for shapes drawn directly ([`Glyph::Circle`], [`Glyph::Rectangle`]).
     fn path(self) -> Option<&'static str> {
         Some(match self {
-            Glyph::Undo => "M8,5 L3,10 L8,15 M4,10 H12 A6,6 0 0 1 18,16 V19",
-            Glyph::Redo => "M10,5 L15,10 L10,15 M14,10 H9 A6,6 0 0 0 3,16 V19",
-            Glyph::New => "M5,3.5 H14.5 L19,8 V20.5 H5 Z M14.5,3.5 V8 H19 M12,12 V18 M9,15 H15",
-            Glyph::Open => "M3,8 V6 H9 L11.5,8.5 H21 V19.5 H3 Z M3,10.5 H21",
-            Glyph::Save => "M4,3.5 H17 L20,6.5 V20.5 H4 Z M7.5,3.5 V9 H16.5 V3.5 M7,20.5 V13 H17 V20.5 M10,6.5 H13",
-            Glyph::SaveAs => {
-                "M4,3.5 H16 L19,6.5 V13 M7.5,3.5 V9 H15.5 V3.5 M7,20.5 V13 H16 M14.5,18.5 L20,13 L22,15 L16.5,20.5 H14.5 Z M18.5,14.5 L20.5,16.5"
-            }
+            // iStCAD 1.0.233's title-bar icons.
+            Glyph::Undo => "M9,5 L4,10 L9,15 M4,10 H15 A5,5 0 0 1 15,20 H10",
+            Glyph::Redo => "M15,5 L20,10 L15,15 M20,10 H9 A5,5 0 0 0 9,20 H14",
+            Glyph::New => "M6,3.5 H14 L19,8.5 V20.5 H6 Z M14,3.5 V8.5 H19 M12.5,12.5 V18 M9.75,15.25 H15.25",
+            Glyph::Open => "M3,6.5 V5.5 H9 L11.5,8 H20.5 V19.5 H3 Z M3,11 H20.5",
+            Glyph::Save => "M4,3.5 H17 L20,6.5 V20.5 H4 Z M7.5,3.5 V9 H16 V3.5 M7.5,20.5 V13.5 H16.5 V20.5",
+            Glyph::SaveAs => "M4,3.5 H17 L20,6.5 V11 M4,3.5 V20.5 H10 M7.5,3.5 V9 H16 V3.5 M12,21 L12.6,18 L19,11.6 L21.4,14 L15,20.4 Z",
             Glyph::Select => "M5,3 L18,14 L12,15.5 L9.5,21 Z",
-            Glyph::Line => "M5,20 L20,5",
-            Glyph::Arc => "M4,18 A9,9 0 0 1 20,8",
-            Glyph::Polyline => "M4,18 L9,7 L15,15 L21,5",
-            Glyph::Move => "M12,3 V21 M3,12 H21 M12,3 L9,6 M12,3 L15,6 M21,12 L18,9 M21,12 L18,15 M12,21 L9,18 M12,21 L15,18 M3,12 L6,9 M3,12 L6,15",
+            // Drawing commands: the object with grips (small squares) at its defining points.
+            Glyph::Line => "M7,17 L17,7 M4,17 H7 V20 H4 Z M17,4 H20 V7 H17 Z",
+            Glyph::Arc => "M5,18 A9.5,9.5 0 0 1 19,8 M3.5,16.5 H6.5 V19.5 H3.5 Z M17.5,6.5 H20.5 V9.5 H17.5 Z",
+            Glyph::Polyline => "M5,18 L9.5,8 L15,15 L19,6 M3.5,16.5 H6.5 V19.5 H3.5 Z M8,6.5 H11 V9.5 H8 Z M13.5,13.5 H16.5 V16.5 H13.5 Z M17.5,4.5 H20.5 V7.5 H17.5 Z",
+            Glyph::Rectangle => "M5,6 H19 V18 H5 Z M3.5,4.5 H6.5 V7.5 H3.5 Z M17.5,16.5 H20.5 V19.5 H17.5 Z",
+            Glyph::Move => "M12,3 V8.5 M12,15.5 V21 M3,12 H8.5 M15.5,12 H21 M9.5,5.5 L12,3 L14.5,5.5 M9.5,18.5 L12,21 L14.5,18.5 M5.5,9.5 L3,12 L5.5,14.5 M18.5,9.5 L21,12 L18.5,14.5 M9.5,9.5 H14.5 V14.5 H9.5 Z",
+            Glyph::Pan => "M12,3 V9.5 M12,14.5 V21 M3,12 H9.5 M14.5,12 H21 M9.5,5.5 L12,3 L14.5,5.5 M9.5,18.5 L12,21 L14.5,18.5 M5.5,9.5 L3,12 L5.5,14.5 M18.5,9.5 L21,12 L18.5,14.5 M10.5,12 A1.5,1.5 0 1 0 13.5,12 A1.5,1.5 0 1 0 10.5,12",
+            Glyph::Rotate => "M19,8 A8,8 0 1 0 20,13 M19,3.5 V8 H14.5 M11,12 A1,1 0 1 0 13,12 A1,1 0 1 0 11,12",
             Glyph::Trim => "M5,5 L19,19 M19,5 L5,19 M6,6 H11 V11 H6 Z M13,13 H18 V18 H13 Z",
             Glyph::Dimension => "M4,18 L18,4 M4,18 L4,13 M4,18 L9,18 M18,4 L13,4 M18,4 L18,9 M7,15 L15,7",
             Glyph::Settings => {
@@ -71,13 +77,16 @@ impl Glyph {
             Glyph::Preferences => "M4,5 H20 M4,12 H20 M4,19 H20 M8,3 V7 M15,10 V14 M11,17 V21",
             Glyph::Menu => "M2,3 H14 M2,7.5 H14 M2,12 H14",
             // In iStCAD's style, for commands iStCAD labels with text glyphs.
-            Glyph::Copy => "M9,9 H20 V20 H9 Z M4,15 V4 H15 V9",
-            Glyph::Erase => "M6,6 L18,18 M18,6 L6,18",
-            Glyph::ZoomExtents => "M4,10.5 A6.5,6.5 0 1 1 17,10.5 A6.5,6.5 0 1 1 4,10.5 M15.2,15.2 L20.5,20.5",
+            Glyph::Copy => "M9,9 H20 V20 H9 Z M4,15 V4 H15 V6.5 M14.5,12 V17 M12,14.5 H17",
+            Glyph::Erase => "M4,14.5 L12.5,6 L19,12.5 L11.5,20 H8 Z M8.25,10.25 L14.75,16.75 M13.5,20 H20",
+            Glyph::ZoomExtents => {
+                "M4,10.5 A6.5,6.5 0 1 1 17,10.5 A6.5,6.5 0 1 1 4,10.5 M15.2,15.2 L20.5,20.5 M7.5,9.5 V7.5 H9.5 M11.5,7.5 H13.5 V9.5 M13.5,11.5 V13.5 H11.5 M9.5,13.5 H7.5 V11.5"
+            }
+            Glyph::ZoomPrevious => "M4,10.5 A6.5,6.5 0 1 1 17,10.5 A6.5,6.5 0 1 1 4,10.5 M15.2,15.2 L20.5,20.5 M7.5,10.5 H13.5 M7.5,10.5 L9.75,8.25 M7.5,10.5 L9.75,12.75",
             Glyph::Plot => "M7,9 V3.5 H17 V9 M4,9 H20 V17 H4 Z M7,14 H17 V20.5 H7 Z",
             Glyph::Layout => "M3,4.5 H21 V19.5 H3 Z M3,9 H21 M9,9 V19.5",
             Glyph::Regen => "M19,12 A7,7 0 1 1 16.9,7 M17.5,3 V7.5 H13",
-            Glyph::Circle | Glyph::Rectangle => return None,
+            Glyph::Circle => return None,
         })
     }
 
@@ -95,11 +104,13 @@ pub fn paint(p: &Painter, rect: Rect, glyph: Glyph, color: Color32, width: f32) 
     let stroke = Stroke::new(width * side / 24.0, color);
     match glyph {
         Glyph::Circle => {
-            p.circle_stroke(rect.center(), 8.5 * s, stroke);
-            return;
-        }
-        Glyph::Rectangle => {
-            p.rect_stroke(Rect::from_center_size(rect.center(), egui::vec2(16.0 * s, 14.0 * s)), 0.0, stroke, egui::StrokeKind::Middle);
+            // The circle with its centre marked and a grip on its edge.
+            let c = rect.center();
+            p.circle_stroke(c, 8.0 * s, stroke);
+            p.line_segment([c - egui::vec2(2.0 * s, 0.0), c + egui::vec2(2.0 * s, 0.0)], stroke);
+            p.line_segment([c - egui::vec2(0.0, 2.0 * s), c + egui::vec2(0.0, 2.0 * s)], stroke);
+            let grip = Rect::from_center_size(c + egui::vec2(8.0 * s, 0.0), egui::vec2(3.0 * s, 3.0 * s));
+            p.rect_stroke(grip, 0.0, stroke, egui::StrokeKind::Middle);
             return;
         }
         _ => {}
@@ -285,8 +296,8 @@ mod tests {
 
     #[test]
     fn istcad_icon_paths_split_into_their_strokes() {
-        // Move: one M per stroke.
-        assert_eq!(subpaths(Glyph::Move.path().unwrap_or_default()).len(), 10);
+        // Move: one M per stroke (four shafts, four heads, the box).
+        assert_eq!(subpaths(Glyph::Move.path().unwrap_or_default()).len(), 9);
         // New: an outline that closes, then three open strokes.
         let new = subpaths(Glyph::New.path().unwrap_or_default());
         assert!(new.first().is_some_and(|(_, closed)| *closed));
@@ -297,7 +308,7 @@ mod tests {
     fn istcad_icon_arcs_end_where_the_path_says() {
         let arc = subpaths(Glyph::Arc.path().unwrap_or_default());
         let last = arc.first().and_then(|(pts, _)| pts.last().copied());
-        assert!(last.is_some_and(|p| (p - pos2(20.0, 8.0)).length() < 1e-3), "{last:?}");
+        assert!(last.is_some_and(|p| (p - pos2(19.0, 8.0)).length() < 1e-3), "{last:?}");
         // The near-full gear circle stays near its 4-unit radius around (12, 12).
         let gear = subpaths(Glyph::Settings.path().unwrap_or_default());
         let ring = gear.last().map(|(pts, _)| pts.clone()).unwrap_or_default();
@@ -318,7 +329,11 @@ mod tests {
             Glyph::Line,
             Glyph::Arc,
             Glyph::Polyline,
+            Glyph::Rectangle,
             Glyph::Move,
+            Glyph::Pan,
+            Glyph::Rotate,
+            Glyph::ZoomPrevious,
             Glyph::Trim,
             Glyph::Dimension,
             Glyph::Settings,

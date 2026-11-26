@@ -1,5 +1,5 @@
 //! Design tokens. The dark palette follows the iStCAD look (slate chrome #222831–#30363F, teal
-//! accent #55C7C0, viewport #192429 with grid #212C34 / #34404F); every widget reads them from here.
+//! accent #55C7C0, viewport #20252B with grid #2B313A / #3A424D (iStCAD 1.0.233)); every widget reads them from here.
 //!
 //! Two palettes: [`Tokens::DARK`] (the original look) and [`Tokens::LIGHT`]. The interface theme
 //! changes the chrome (title and tool bar, menus, palettes, tabs, command line, status bar,
@@ -135,9 +135,9 @@ impl Tokens {
         control: Color32::from_rgb(0x41, 0x47, 0x50),
         control_hover: Color32::from_rgb(0x4a, 0x51, 0x5b),
         border: Color32::from_rgb(0x55, 0x5b, 0x65),
-        canvas: Color32::from_rgb(0x19, 0x24, 0x29),
-        grid_minor: Color32::from_rgb(0x21, 0x2c, 0x34),
-        grid_major: Color32::from_rgb(0x34, 0x40, 0x4f),
+        canvas: Color32::from_rgb(0x20, 0x25, 0x2b),
+        grid_minor: Color32::from_rgb(0x2b, 0x31, 0x3a),
+        grid_major: Color32::from_rgb(0x3a, 0x42, 0x4d),
         axis_x: Color32::from_rgb(0x3e, 0x4e, 0x5e),
         axis_y: Color32::from_rgb(0x3e, 0x4e, 0x5e),
         text: Color32::from_rgb(0xe8, 0xec, 0xee),
