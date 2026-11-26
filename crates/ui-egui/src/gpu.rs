@@ -109,6 +109,25 @@ pub struct MeshData {
     /// The vertex buffers already created from this data (see [`MeshData::upload_now`]); the
     /// paint callback then only swaps them in.
     uploaded: Option<Uploaded>,
+    /// A list drawn in parts instead (the canvas's model-space chunks, see
+    /// [`cadcraft_render::ChunkCache`]), in drawing order, each under a key naming its content.
+    /// The GPU keeps each part's buffers, so after an edit only the parts that changed are
+    /// uploaded.
+    parts: Vec<(u64, Arc<PartMesh>)>,
+}
+
+/// The vertex data of one part of a list drawn in parts ([`MeshData::from_parts`]).
+pub struct PartMesh {
+    lines: Vec<u8>,
+    tris: Vec<u8>,
+    quads: Vec<u8>,
+}
+
+/// The vertex data of `list` as one part of a list drawn in parts, or `None` when it holds a
+/// wipeout mask (masks split the draw order, which parts can't).
+pub fn build_part_mesh(list: &DisplayList, origin: Vec2, bg: Rgb, lwdisplay: bool) -> Option<PartMesh> {
+    let m = build_mesh(list, origin, bg, lwdisplay);
+    m.breaks.is_empty().then_some(PartMesh { lines: m.lines, tris: m.tris, quads: m.quads })
 }
 
 /// GPU buffers made ahead of the frame that draws them.
@@ -119,6 +138,12 @@ struct Uploaded {
 }
 
 impl MeshData {
+    /// A list drawn in parts: `parts` in drawing order, each under a key that changes whenever
+    /// its content does.
+    pub fn from_parts(parts: Vec<(u64, Arc<PartMesh>)>) -> MeshData {
+        MeshData { parts, ..MeshData::default() }
+    }
+
     /// Create the vertex buffers now, on the calling thread, and let the CPU copy go. Making a
     /// buffer zero-fills and copies it: about 0.35 s for a million-primitive drawing, which a
     /// background rebuild does off the UI thread (see `canvas::rebuild`).
@@ -187,6 +212,7 @@ pub fn build_mesh(list: &DisplayList, origin: Vec2, bg: Rgb, lwdisplay: bool) ->
         quads: Vec::new(),
         breaks: Vec::new(),
         uploaded: None,
+        parts: Vec::new(),
     };
     for prim in &list.prims {
         let col = premultiplied(prim.display_rgb(bg), prim.alpha());
@@ -372,8 +398,10 @@ fn translucent(c: [u8; 4], alpha: f32) -> [u8; 4] {
 }
 pub const IDENTITY_XFORM: [f32; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
+/// A vertex buffer, shared by the drawn mesh and the part it was uploaded for.
+#[derive(Clone)]
 struct Batch {
-    buffer: wgpu::Buffer,
+    buffer: Arc<wgpu::Buffer>,
     count: u32,
 }
 
@@ -386,6 +414,9 @@ struct Layer {
     tris: Vec<Batch>,
     quads: Vec<Batch>,
     breaks: Vec<[usize; 3]>,
+    /// The buffers of each part of a list drawn in parts, by part key: kept while the list
+    /// keeps the part.
+    parts: std::collections::HashMap<u64, Uploaded>,
 }
 
 struct Resources {
@@ -535,7 +566,16 @@ impl Resources {
                 layout: &bgl,
                 entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
             });
-            Layer { uniform, bind_group, key: None, lines: Vec::new(), tris: Vec::new(), quads: Vec::new(), breaks: Vec::new() }
+            Layer {
+                uniform,
+                bind_group,
+                key: None,
+                lines: Vec::new(),
+                tris: Vec::new(),
+                quads: Vec::new(),
+                breaks: Vec::new(),
+                parts: std::collections::HashMap::new(),
+            }
         };
         // A render pass with a stencil buffer needs every pipeline to name its format; only the
         // clipped-viewport pipelines read or write it.
@@ -610,7 +650,7 @@ fn upload(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, usage
         .chunks(CHUNK * stride)
         .filter(|c| c.len() >= stride)
         .map(|c| Batch {
-            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: c, usage }),
+            buffer: Arc::new(device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: c, usage })),
             count: u32::try_from(c.len() / stride).unwrap_or(0),
         })
         .collect()
@@ -711,15 +751,40 @@ impl egui_wgpu::CallbackTrait for CanvasCallback {
         let Some(res) = res.layers.get_mut(self.layer) else { return Vec::new() };
         if res.key != Some(self.key) {
             let pending = self.slot.lock().ok().and_then(|mut s| s.take());
-            if let Some(mut m) = pending {
-                if m.uploaded.is_none() {
-                    m.upload_now(device);
+            match pending {
+                Some(m) if !m.parts.is_empty() => {
+                    // Upload only the parts the GPU doesn't hold yet; drop those the list left.
+                    let usage = wgpu::BufferUsages::VERTEX;
+                    let mut kept = std::collections::HashMap::with_capacity(m.parts.len());
+                    let (mut lines, mut tris, mut quads) = (Vec::new(), Vec::new(), Vec::new());
+                    for (k, part) in &m.parts {
+                        let u = res.parts.remove(k).unwrap_or_else(|| Uploaded {
+                            lines: upload(device, "cad_lines", &part.lines, VERTEX_SIZE, usage),
+                            tris: upload(device, "cad_fills", &part.tris, VERTEX_SIZE, usage),
+                            quads: upload(device, "cad_quads", &part.quads, INSTANCE_SIZE, usage),
+                        });
+                        lines.extend(u.lines.iter().cloned());
+                        tris.extend(u.tris.iter().cloned());
+                        quads.extend(u.quads.iter().cloned());
+                        kept.insert(*k, u);
+                    }
+                    res.parts = kept;
+                    (res.lines, res.tris, res.quads) = (lines, tris, quads);
+                    res.breaks = Vec::new();
+                    res.key = Some(self.key);
                 }
-                if let Some(u) = m.uploaded {
-                    (res.lines, res.tris, res.quads) = (u.lines, u.tris, u.quads);
+                Some(mut m) => {
+                    res.parts.clear();
+                    if m.uploaded.is_none() {
+                        m.upload_now(device);
+                    }
+                    if let Some(u) = m.uploaded {
+                        (res.lines, res.tris, res.quads) = (u.lines, u.tris, u.quads);
+                    }
+                    res.breaks = m.breaks;
+                    res.key = Some(self.key);
                 }
-                res.breaks = m.breaks;
-                res.key = Some(self.key);
+                None => {}
             }
         }
         let ppp = screen.pixels_per_point;

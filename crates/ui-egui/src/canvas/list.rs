@@ -178,6 +178,8 @@ pub(super) fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], c
     app.canvas.key = key;
     app.canvas.window = opts.view;
     app.canvas.list_gen = app.canvas.list_gen.wrapping_add(1);
+    // A list built in parts is uploaded part by part: an edit sends the GPU only what changed.
+    app.canvas.parts_gen = app.canvas.chunks.parted().then_some(app.canvas.list_gen);
     app.canvas.build_ms = crate::now_ms() - t0;
 }
 

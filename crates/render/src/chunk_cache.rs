@@ -28,7 +28,14 @@ pub struct ChunkCache {
     doc: Option<Arc<Drawing>>,
     /// The options the parts were built with (point sizes resolved).
     opts: Option<Options>,
-    parts: HashMap<usize, DisplayList>,
+    /// Each chunk's part with the id it was drawn under.
+    parts: HashMap<usize, (u64, DisplayList)>,
+    /// The chunks of the last list built in parts, in drawing order; empty when it was built in
+    /// one go.
+    order: Vec<usize>,
+    /// The id the next part drawn gets. Ids are never reused, so an id names one part's content
+    /// for good (a chunk drawn again after a new zoom band gets a new one).
+    next_id: u64,
     /// Chunks the last build took from the cache.
     pub reused: usize,
     /// Chunks the last build drew afresh.
@@ -41,6 +48,7 @@ impl ChunkCache {
         self.doc = None;
         self.opts = None;
         self.parts.clear();
+        self.order.clear();
         self.reused = 0;
         self.rebuilt = 0;
     }
@@ -70,6 +78,7 @@ impl ChunkCache {
             return None;
         }
         let same = self.doc.as_ref().is_some_and(|prev| same_context(prev, doc)) && self.opts.as_ref().is_some_and(|o| same_opts(o, &resolved));
+        self.order.clear();
         if !same {
             self.parts.clear();
         }
@@ -78,7 +87,8 @@ impl ChunkCache {
         let wanted: std::collections::HashSet<usize> = chunks.iter().map(|(k, _)| *k).collect();
         self.parts.retain(|k, _| wanted.contains(k));
         let missing: Vec<&(usize, &[Arc<super::Entity>])> = chunks.iter().filter(|(k, _)| !self.parts.contains_key(k)).collect();
-        let (expanded, points) = self.parts.values().fold((0usize, 0usize), |(e, p), l| (e.saturating_add(l.expanded), p.saturating_add(l.verts.len() + l.tris.len())));
+        let (expanded, points) =
+            self.parts.values().fold((0usize, 0usize), |(e, p), (_, l)| (e.saturating_add(l.expanded), p.saturating_add(l.verts.len() + l.tris.len())));
         let budget = std::sync::atomic::AtomicUsize::new(expanded);
         let charged = std::sync::atomic::AtomicUsize::new(points);
         let fresh: Vec<(usize, DisplayList)> = missing
@@ -87,25 +97,40 @@ impl ChunkCache {
             .collect();
         self.reused = chunks.len() - fresh.len();
         self.rebuilt = fresh.len();
-        self.parts.extend(fresh);
-        let total_points = self.parts.values().map(|l| l.verts.len() + l.tris.len()).sum::<usize>();
-        let total_expanded = self.parts.values().map(|l| l.expanded).sum::<usize>();
+        for (key, part) in fresh {
+            self.parts.insert(key, (self.next_id, part));
+            self.next_id = self.next_id.wrapping_add(1);
+        }
+        let total_points = self.parts.values().map(|(_, l)| l.verts.len() + l.tris.len()).sum::<usize>();
+        let total_expanded = self.parts.values().map(|(_, l)| l.expanded).sum::<usize>();
         // A list cut short by a budget is built in one go, as a full build would cut it.
-        if self.parts.values().any(|l| l.truncated) || total_points > MAX_DISPLAY_POINTS || total_expanded > MAX_BLOCK_EXPANSION {
+        if self.parts.values().any(|(_, l)| l.truncated) || total_points > MAX_DISPLAY_POINTS || total_expanded > MAX_BLOCK_EXPANSION {
             return None;
         }
         let mut list = DisplayList::default();
-        list.prims.reserve(self.parts.values().map(|p| p.prims.len()).sum());
-        list.verts.reserve(self.parts.values().map(|p| p.verts.len()).sum());
-        list.tris.reserve(self.parts.values().map(|p| p.tris.len()).sum());
+        list.prims.reserve(self.parts.values().map(|(_, p)| p.prims.len()).sum());
+        list.verts.reserve(self.parts.values().map(|(_, p)| p.verts.len()).sum());
+        list.tris.reserve(self.parts.values().map(|(_, p)| p.tris.len()).sum());
         for (key, _) in &chunks {
-            if let Some(part) = self.parts.get(key) {
+            if let Some((_, part)) = self.parts.get(key) {
                 append(&mut list, part.clone());
             }
         }
         self.doc = Some(doc.clone());
         self.opts = Some(resolved);
+        self.order = chunks.iter().map(|(k, _)| *k).collect();
         Some(list)
+    }
+
+    /// The parts of the last list, in drawing order, each with an id that names its content for
+    /// good: equal ids, equal parts. Empty when the last list was built in one go.
+    pub fn parts(&self) -> impl Iterator<Item = (u64, &DisplayList)> + '_ {
+        self.order.iter().filter_map(|k| self.parts.get(k).map(|(id, p)| (*id, p)))
+    }
+
+    /// Whether the last list was built in parts ([`ChunkCache::parts`]).
+    pub fn parted(&self) -> bool {
+        !self.order.is_empty()
     }
 }
 

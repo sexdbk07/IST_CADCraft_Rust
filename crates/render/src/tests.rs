@@ -1541,6 +1541,8 @@ fn chunk_cache_redraws_only_edited_chunks_and_matches_a_full_build() {
     let mut cache = ChunkCache::default();
     let first = std::sync::Arc::new(d);
     assert!(same(&cache.build(&first, &Space::Model, &opts), &build(&first, &Space::Model, &opts)));
+    let ids = |c: &ChunkCache| c.parts().map(|(id, _)| id).collect::<Vec<_>>();
+    let before = ids(&cache);
 
     let mut edited = (*first).clone();
     let h = edited.model.iter().nth(1500).map(|e| e.handle).unwrap();
@@ -1549,6 +1551,10 @@ fn chunk_cache_redraws_only_edited_chunks_and_matches_a_full_build() {
     let list = cache.build(&edited, &Space::Model, &opts);
     assert!(same(&list, &build(&edited, &Space::Model, &opts)));
     assert!(cache.reused > 0 && cache.rebuilt < cache.reused, "reused {} rebuilt {}", cache.reused, cache.rebuilt);
+    // The GPU keeps each part by its id: only the edited chunk's part has a new one.
+    let after = ids(&cache);
+    assert_eq!(before.len(), after.len());
+    assert_eq!(before.iter().zip(&after).filter(|(a, b)| a != b).count(), 1);
 
     let mut recoloured = (*edited).clone();
     if let Some(l) = recoloured.layers.iter_mut().find(|l| l.name == "0") {

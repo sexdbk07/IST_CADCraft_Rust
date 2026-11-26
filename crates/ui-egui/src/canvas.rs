@@ -109,6 +109,10 @@ pub struct CanvasState {
     /// The parts of the last model-space list by store chunk: a build after an edit redraws only
     /// the chunks the edit changed ([`cadcraft_render::ChunkCache`]).
     chunks: cadcraft_render::ChunkCache,
+    /// The `list_gen` of the list when it is [`CanvasState::chunks`]'s parts joined.
+    parts_gen: Option<u64>,
+    /// The vertex data of each part of that list, by the key the GPU keeps its buffers under.
+    part_meshes: std::collections::HashMap<u64, std::sync::Arc<crate::gpu::PartMesh>>,
     key: ListKey,
     /// The area `list` was built for (hatch patterns exist only inside it); a view leaving it
     /// rebuilds the list.

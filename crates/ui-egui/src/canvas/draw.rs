@@ -283,7 +283,8 @@ pub(super) fn draw_list_gpu(c: &mut CanvasState, p: &egui::Painter, xf: &Xf, bg:
     let key = list_mesh_key(&c.key, c.list_gen, origin, bg, lwdisplay);
     if c.mesh_key != Some(key) {
         let t0 = crate::now_ms();
-        let mesh = crate::gpu::build_mesh(list, origin, bg, lwdisplay);
+        let parted = if c.parts_gen == Some(c.list_gen) { parted_mesh(&c.chunks, &mut c.part_meshes, origin, bg, lwdisplay) } else { None };
+        let mesh = parted.unwrap_or_else(|| crate::gpu::build_mesh(list, origin, bg, lwdisplay));
         if let Ok(mut slot) = c.mesh_slot.lock() {
             *slot = Some(mesh);
         }
@@ -318,6 +319,35 @@ pub(super) fn draw_list_gpu(c: &mut CanvasState, p: &egui::Painter, xf: &Xf, bg:
         }
     }
     p.extend(shapes);
+}
+
+/// The vertex data of a list built in parts ([`cadcraft_render::ChunkCache`]): each part's data
+/// is made once and kept in `meshes` under a key naming its content, origin, background and
+/// lineweight display, so after an edit only the changed parts are converted and uploaded.
+/// `None` when a part can't be drawn on its own (it holds a wipeout).
+fn parted_mesh(
+    chunks: &cadcraft_render::ChunkCache,
+    meshes: &mut std::collections::HashMap<u64, std::sync::Arc<crate::gpu::PartMesh>>,
+    origin: Vec2,
+    bg: Rgb,
+    lwdisplay: bool,
+) -> Option<crate::gpu::MeshData> {
+    use std::hash::{Hash, Hasher};
+    let mut parts = Vec::new();
+    let mut kept = std::collections::HashMap::new();
+    for (id, part) in chunks.parts() {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (id, origin.x.to_bits(), origin.y.to_bits(), bg.0, bg.1, bg.2, lwdisplay).hash(&mut h);
+        let key = h.finish();
+        let mesh = match meshes.remove(&key) {
+            Some(m) => m,
+            None => std::sync::Arc::new(crate::gpu::build_part_mesh(part, origin, bg, lwdisplay)?),
+        };
+        parts.push((key, mesh.clone()));
+        kept.insert(key, mesh);
+    }
+    *meshes = kept;
+    (!parts.is_empty()).then(|| crate::gpu::MeshData::from_parts(parts))
 }
 
 /// How a highlight is drawn: lines `width` points wide, and either solid with fills filled or
