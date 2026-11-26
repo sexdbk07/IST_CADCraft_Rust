@@ -1,0 +1,17 @@
+# craft-dwg from storytold/craft-libs at 453b0da782ccef39be9a6dac8d27c80b553ef1cc (MIT OR Apache-2.0),
+# vendored by IST_CADCraft to build against a newer acadrust than craft-libs pins (=0.6.6).
+[package]
+name = "craft-dwg"
+description = "Bounded DWG↔DXF byte bridge with an optional child-process worker"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/storytold/craft-libs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[target.'cfg(not(any(target_arch = "wasm32", all(target_os = "freebsd", target_arch = "aarch64"))))'.dependencies]
+acadrust = "=0.6.8"
+log = "0.4"
