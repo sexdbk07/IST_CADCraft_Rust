@@ -4857,7 +4857,8 @@ fn attribute_on_layer_zero_keeps_its_layer() {
     .unwrap();
     let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
     let ins = first(&back, |k| if let EntityKind::Insert(i) = k { Some(i.clone()) } else { None });
-    let layer_of = |tag: &str| ins.attribs.iter().find(|a| a.tag == tag).map(|a| a.props.over(&Common { layer: "Walls".into(), ..Common::default() }).layer);
+    let layer_of =
+        |tag: &str| ins.attribs.iter().find(|a| a.tag == tag).map(|a| a.props.over(&Common { layer: "Walls".into(), ..Common::default() }).layer);
     assert_eq!(layer_of("OWN").as_deref(), Some("0"));
     assert_eq!(layer_of("INHERITED").as_deref(), Some("Walls"));
 }

@@ -82,6 +82,17 @@ pub(crate) enum Command {
     Perf(PerfArgs),
     Sample(SampleArgs),
     Roundtrip(RoundtripArgs),
+    #[command(hide = true)]
+    DwgDxf(DwgDxfArgs),
+}
+
+/// Write the DXF rendition the DWG decoder makes of a DWG, before CADCraft reads it (diagnostics)
+#[derive(Args)]
+pub(crate) struct DwgDxfArgs {
+    #[arg(value_name = "IN.dwg")]
+    pub(crate) input: PathBuf,
+    #[arg(value_name = "OUT.dxf")]
+    pub(crate) output: PathBuf,
 }
 
 /// Print a drawing's summary as JSON

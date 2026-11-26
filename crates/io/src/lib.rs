@@ -96,6 +96,16 @@ pub fn read(bytes: &[u8], name: impl AsRef<Path>) -> Result<Drawing> {
     read_source(bytes, name.as_ref()).map(|(d, _)| d)
 }
 
+/// The DXF rendition the DWG decoder makes of `bytes`, before CADCraft reads it: what a DWG
+/// holds in DXF terms, for diagnosing what a read or a save changes (`cadcraft-cli dwg-dxf`).
+pub fn dwg_dxf_rendition(bytes: &[u8]) -> Result<Vec<u8>> {
+    if !craft_dwg::is_dwg(bytes) {
+        return Err(IoError::Format("not a DWG file".into()));
+    }
+    let (dxf, _) = craft_dwg::decode(bytes, craft_dwg::Limits::DEFAULT).map_err(dwg_error)?;
+    Ok(dwg_hatch::elliptic_edge_degrees(dxf))
+}
+
 /// [`read`], also returning the DXF rendition a DWG was read through (`None` for other files),
 /// which the round-trip harness counts.
 pub(crate) fn read_source(bytes: &[u8], name: &Path) -> Result<(Drawing, Option<Vec<u8>>)> {

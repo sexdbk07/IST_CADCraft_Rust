@@ -113,7 +113,7 @@ where
         Command::Run(a) => a.settings.apply(),
         Command::Mcp(a) => a.settings.apply(),
         Command::Sample(a) => a.settings.apply(),
-        Command::Info(_) | Command::Commands(_) | Command::Perf(_) | Command::Roundtrip(_) => {}
+        Command::Info(_) | Command::Commands(_) | Command::Perf(_) | Command::Roundtrip(_) | Command::DwgDxf(_) => {}
     }
     let mut io = Streams::new(out, err);
     let result = match &cli.command {
@@ -125,6 +125,7 @@ where
         Command::Perf(a) => perf(a.target.as_ref(), &mut io),
         Command::Sample(a) => sample(a, &mut io),
         Command::Roundtrip(a) => roundtrip(a, &mut io),
+        Command::DwgDxf(a) => dwg_dxf(a),
     };
     let mut code = 0;
     if let Err(e) = result {
@@ -133,6 +134,13 @@ where
     }
     io.finish();
     if io.stdout_failed() { 1 } else { code }
+}
+
+/// `dwg-dxf IN OUT`: the decoder's DXF rendition of a DWG.
+fn dwg_dxf(a: &args::DwgDxfArgs) -> error::Result {
+    let bytes = std::fs::read(&a.input)?;
+    std::fs::write(&a.output, cadcraft_io::dwg_dxf_rendition(&bytes)?)?;
+    Ok(())
 }
 
 #[cfg(test)]
