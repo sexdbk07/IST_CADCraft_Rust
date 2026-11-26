@@ -83,6 +83,21 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
         assert!(shown.iter().any(|t| t == group), "Ctrl+1 shows the Properties palette with {group:?}: {shown:?}");
     }
     save(&mut h, "02-properties");
+
+    // One circle: its Geometry rows, edited through the palette's own path.
+    let circle = h.state().session.doc().ok().and_then(|d| {
+        d.model.iter().find(|e| matches!(e.kind, cadcraft_engine::doc::EntityKind::Circle(_))).map(|e| e.handle.hex())
+    });
+    if let Some(c) = circle {
+        let _ = h.state_mut().run("select", json!({ "clear": true }));
+        let _ = h.state_mut().run("select", json!({ "handles": [c] }));
+        h.run_steps(4);
+        let shown = painted(&h);
+        for label in ["Geometry", "Center X", "Radius", "Diameter"] {
+            assert!(shown.iter().any(|t| t == label), "a circle's Properties show {label:?}: {shown:?}");
+        }
+        save(&mut h, "05-circle-properties");
+    }
     let _ = h.state_mut().run("ui.istcad.properties", json!({ "on": false }));
     let _ = h.state_mut().run("select", json!({ "clear": true }));
 
