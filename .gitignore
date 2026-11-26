@@ -17,3 +17,7 @@
 /craft-i18n
 /craft-fonts
 __pycache__/
+
+# Visual Studio (IST_CADCraft.sln)
+.vs/
+*.vcxproj.user

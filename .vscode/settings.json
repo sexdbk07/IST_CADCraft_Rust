@@ -1,0 +1,7 @@
+{
+  "rust-analyzer.cargo.features": [],
+  "rust-analyzer.check.command": "check",
+  "rust-analyzer.linkedProjects": ["Cargo.toml"],
+  "files.exclude": { "target": true },
+  "search.exclude": { "target": true }
+}

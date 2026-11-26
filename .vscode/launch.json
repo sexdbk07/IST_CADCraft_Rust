@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "IST_CADCraft (Windows, MSVC debugger)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/cadcraft.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "IST_CADCraft: build (debug)",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "IST_CADCraft (Windows, MSVC debugger) + sample",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/cadcraft.exe",
+      "args": ["--sample"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "IST_CADCraft: build (debug)",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "IST_CADCraft (CodeLLDB, macOS / Linux / Windows)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "-p", "cadcraft"],
+        "filter": { "name": "cadcraft", "kind": "bin" }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="app"><UniqueIdentifier>{8C1D2E3F-1111-4A2B-9C3D-000000000001}</UniqueIdentifier></Filter>
+    <Filter Include="ui (iStCAD shell)"><UniqueIdentifier>{8C1D2E3F-1111-4A2B-9C3D-000000000002}</UniqueIdentifier></Filter>
+    <Filter Include="engine"><UniqueIdentifier>{8C1D2E3F-1111-4A2B-9C3D-000000000003}</UniqueIdentifier></Filter>
+    <Filter Include="core"><UniqueIdentifier>{8C1D2E3F-1111-4A2B-9C3D-000000000004}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\apps\cadcraft\src\**\*.rs"><Filter>app</Filter></None>
+    <None Include="..\crates\ui-egui\src\**\*.rs"><Filter>ui (iStCAD shell)</Filter></None>
+    <None Include="..\crates\engine\src\**\*.rs"><Filter>engine</Filter></None>
+    <None Include="..\crates\doc\src\**\*.rs"><Filter>core</Filter></None>
+    <None Include="..\crates\render\src\**\*.rs"><Filter>core</Filter></None>
+    <None Include="..\crates\io\src\**\*.rs"><Filter>core</Filter></None>
+    <None Include="..\crates\geom\src\**\*.rs"><Filter>core</Filter></None>
+  </ItemGroup>
+</Project>

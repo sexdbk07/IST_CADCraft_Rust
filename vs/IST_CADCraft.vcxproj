@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  IST_CADCraft for Visual Studio (Professional / Community / Enterprise, 2022 or later).
+  A Makefile project: Build / Rebuild / Clean call Cargo, F5 starts target\<config>\cadcraft.exe
+  under the Visual Studio debugger (Rust emits PDB symbols on Windows, so breakpoints in .rs files
+  work). Needs the "Desktop development with C++" workload and Rust (rustup, MSVC toolchain).
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{6F2B6C1E-3A57-4C2E-9E1B-1A2D7C5B9E01}</ProjectGuid>
+    <Keyword>MakeFileProj</Keyword>
+    <RootNamespace>IST_CADCraft</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <!-- Whatever toolset this Visual Studio installs (v143 for 2022, newer for later versions). -->
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))</RepoRoot>
+    <CargoProfileArg Condition="'$(Configuration)'=='Release'">--release</CargoProfileArg>
+    <CargoOutDir Condition="'$(Configuration)'=='Debug'">debug</CargoOutDir>
+    <CargoOutDir Condition="'$(Configuration)'=='Release'">release</CargoOutDir>
+    <OutDir>$(RepoRoot)\target\$(CargoOutDir)\</OutDir>
+    <IntDir>$(RepoRoot)\target\vs\$(Configuration)\</IntDir>
+    <NMakeBuildCommandLine>cd /d "$(RepoRoot)" &amp;&amp; cargo build -p cadcraft $(CargoProfileArg) --message-format=short</NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>cd /d "$(RepoRoot)" &amp;&amp; cargo clean -p cadcraft $(CargoProfileArg) &amp;&amp; cargo build -p cadcraft $(CargoProfileArg) --message-format=short</NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>cd /d "$(RepoRoot)" &amp;&amp; cargo clean -p cadcraft $(CargoProfileArg)</NMakeCleanCommandLine>
+    <NMakeOutput>$(OutDir)cadcraft.exe</NMakeOutput>
+    <NMakePreprocessorDefinitions />
+    <LocalDebuggerCommand>$(OutDir)cadcraft.exe</LocalDebuggerCommand>
+    <LocalDebuggerWorkingDirectory>$(RepoRoot)</LocalDebuggerWorkingDirectory>
+    <LocalDebuggerCommandArguments />
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <!-- Source files, for browsing and breakpoints (Cargo does the building). -->
+  <ItemGroup>
+    <None Include="..\Cargo.toml" />
+    <None Include="..\README.md" />
+    <None Include="..\docs\ISTCAD.md" />
+    <None Include="..\apps\cadcraft\src\**\*.rs" />
+    <None Include="..\crates\ui-egui\src\**\*.rs" />
+    <None Include="..\crates\engine\src\**\*.rs" />
+    <None Include="..\crates\doc\src\**\*.rs" />
+    <None Include="..\crates\render\src\**\*.rs" />
+    <None Include="..\crates\io\src\**\*.rs" />
+    <None Include="..\crates\geom\src\**\*.rs" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
