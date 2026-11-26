@@ -753,7 +753,7 @@ mod native {
     /// common dimension data), which acadrust keeps no copy of from DXF: it is set here as
     /// CADCraft's DXF writer always sets it (#1094). Bit 0, the opposite of group 70's bit 128,
     /// acadrust 0.6.6 reads and writes itself.
-    /// Decode `\U+XXXX` and `\M+` escapes left in multiline text. The bridge DXF is R2000, where
+    /// Decode `\U+XXXX` and `\M+` escapes left in multiline text of a 2007 or later DWG. The bridge DXF is R2000, where
     /// characters outside ASCII are written as those escapes; acadrust decodes them in a TEXT's
     /// value but not in the 250-character chunks (group 3) of a long MTEXT, so such text reached
     /// the DWG with the escapes spelled out (`TA\U+00DBI` for `TAÛI`). AutoCAD shows both the
@@ -761,6 +761,11 @@ mod native {
     fn mtext_escapes(doc: &mut acadrust::CadDocument) {
         use acadrust::io::dxf::code_page::decode_legacy_escapes;
         let escaped = |v: &str| v.contains("\\U+") || v.contains("\\M+");
+        // A DWG before 2007 holds text in its code page, where these escapes are how AutoCAD
+        // keeps the characters the code page lacks.
+        if doc.version < acadrust::DxfVersion::AC1021 {
+            return;
+        }
         if !doc.entities().any(|e| matches!(e, acadrust::entities::EntityType::MText(m) if escaped(&m.value))) {
             return;
         }
@@ -1009,7 +1014,9 @@ mod native {
     /// `$DWGCODEPAGE` to decode it by). From AutoCAD 2007 (AC1021) a DXF is UTF-8, so other bytes
     /// are first decoded with the code page the DXF declares; `\U+XXXX` escapes read the same in
     /// every version, and CADCraft's R2000 DXF is ASCII with such escapes.
-    pub(super) fn declare_version(dxf: &[u8], kept: acadrust::DxfVersion) -> Option<Vec<u8>> {
+    /// `unicode`: the DWG written is 2007 or later, so the R2000 `\U+` escapes are decoded (an
+    /// older DWG keeps them, as AutoCAD writes characters its code page lacks).
+    pub(super) fn declare_version(dxf: &[u8], kept: acadrust::DxfVersion, unicode: bool) -> Option<Vec<u8>> {
         if dxf.starts_with(b"AutoCAD Binary DXF") {
             return None;
         }
@@ -1039,7 +1046,7 @@ mod native {
         // characters. acadrust decodes them in some values but not in table record names (a
         // layer or text style named in Vietnamese reached the DWG as `K\U+00EDCH TH\U+01B0...`).
         let text: std::borrow::Cow<'_, [u8]> =
-            if kept >= acadrust::DxfVersion::AC1021 && text.windows(3).any(|w| w == b"\\U+") { std::borrow::Cow::Owned(decode_unicode_escapes(&text)) } else { text };
+            if unicode && kept >= acadrust::DxfVersion::AC1021 && text.windows(3).any(|w| w == b"\\U+") { std::borrow::Cow::Owned(decode_unicode_escapes(&text)) } else { text };
         let (at, value) = header_value(&text, b"$ACADVER")?;
         let code = kept.to_string();
         let mut out = Vec::with_capacity(text.len().saturating_add(code.len()));
@@ -1347,7 +1354,10 @@ mod native {
             ));
         }
         // Decoding a code page to UTF-8 can grow the text, so the limit applies again.
-        let (data, legacy) = match kept.and_then(|k| declare_version(dxf, k).map(|d| (k, d))) {
+        // The DWG is written at `version`, else at the declared (kept) version: 2007 or later
+        // holds any character, an older one keeps the R2000 escapes.
+        let unicode = version.is_none_or(|v| v >= acadrust::DxfVersion::AC1021);
+        let (data, legacy) = match kept.and_then(|k| declare_version(dxf, k, unicode).map(|d| (k, d))) {
             Some((_, d)) if d.len() > Limits::DEFAULT.max_dxf_bytes => {
                 return Err(format!(
                     "DXF: the input is {} as UTF-8, larger than the {} accepted for DWG conversion",
@@ -2095,7 +2105,7 @@ mod tests {
     #[test]
     fn declare_version_changes_only_acadver() {
         let dxf = r2000(b"A\\U+00E7\\U+00E3o \\U+D83D\\U+DE00 \\U+ZZZZ");
-        let out = native::declare_version(&dxf, acadrust::DxfVersion::AC1032).unwrap();
+        let out = native::declare_version(&dxf, acadrust::DxfVersion::AC1032, true).unwrap();
         let expected = String::from_utf8(dxf).unwrap().replacen("AC1015", "AC1032", 1).replace("A\\U+00E7\\U+00E3o \\U+D83D\\U+DE00", "A\u{e7}\u{e3}o \u{1f600}");
         assert_eq!(String::from_utf8(out).unwrap(), expected);
     }
@@ -2106,14 +2116,14 @@ mod tests {
     #[test]
     fn declare_version_leaves_what_it_need_not_change() {
         let dxf = r2000(b"x");
-        assert_eq!(native::declare_version(&dxf, acadrust::DxfVersion::AC1015), None);
-        assert_eq!(native::declare_version(&dxf, acadrust::DxfVersion::AC1009), None);
-        assert_eq!(native::declare_version(b"AutoCAD Binary DXF\r\n\x1a\0", acadrust::DxfVersion::AC1032), None);
+        assert_eq!(native::declare_version(&dxf, acadrust::DxfVersion::AC1015, true), None);
+        assert_eq!(native::declare_version(&dxf, acadrust::DxfVersion::AC1009, true), None);
+        assert_eq!(native::declare_version(b"AutoCAD Binary DXF\r\n\x1a\0", acadrust::DxfVersion::AC1032, true), None);
         let no_version = b"  0\r\nSECTION\r\n  2\r\nHEADER\r\n  0\r\nENDSEC\r\n  0\r\nEOF\r\n";
-        assert_eq!(native::declare_version(no_version, acadrust::DxfVersion::AC1032), None);
+        assert_eq!(native::declare_version(no_version, acadrust::DxfVersion::AC1032, true), None);
         // A `$ACADVER` outside the HEADER section is not the file's version.
         let late = b"  0\r\nSECTION\r\n  2\r\nHEADER\r\n  0\r\nENDSEC\r\n  9\r\n$ACADVER\r\n  1\r\nAC1015\r\n";
-        assert_eq!(native::declare_version(late, acadrust::DxfVersion::AC1032), None);
+        assert_eq!(native::declare_version(late, acadrust::DxfVersion::AC1032, true), None);
     }
 
     /// The header is read as group code and value pairs up to the first `0`/`ENDSEC`: a `$ACADVER`
@@ -2123,11 +2133,11 @@ mod tests {
     #[test]
     fn declare_version_reads_the_header_in_pairs_up_to_endsec() {
         let cut = b"  0\r\nSECTION\r\n  2\r\nHEADER\r\n  9\r\n$ACADVER\r\n  0\r\nENDSEC\r\n  1\r\nAC1015\r\n";
-        assert_eq!(native::declare_version(cut, acadrust::DxfVersion::AC1032), None);
+        assert_eq!(native::declare_version(cut, acadrust::DxfVersion::AC1032, true), None);
         let endless = vec![b'\n'; 1 << 20];
-        assert_eq!(native::declare_version(&endless, acadrust::DxfVersion::AC1032), None);
+        assert_eq!(native::declare_version(&endless, acadrust::DxfVersion::AC1032, true), None);
         let crlf = b"  0\r\nSECTION\r\n  2\r\nHEADER\r\n  9\r\n$ACADVER\r\n  1\r\n  AC1015\r\n  0\r\nENDSEC\r\n";
-        let out = native::declare_version(crlf, acadrust::DxfVersion::AC1032).unwrap();
+        let out = native::declare_version(crlf, acadrust::DxfVersion::AC1032, true).unwrap();
         assert_eq!(out, b"  0\r\nSECTION\r\n  2\r\nHEADER\r\n  9\r\n$ACADVER\r\n  1\r\n  AC1032\r\n  0\r\nENDSEC\r\n");
     }
 
@@ -2137,21 +2147,21 @@ mod tests {
     #[test]
     fn declare_version_decodes_a_code_page_for_utf8_versions() {
         let dxf = r2000(b"A\xe7\xe3o");
-        let utf8 = native::declare_version(&dxf, acadrust::DxfVersion::AC1032).unwrap();
+        let utf8 = native::declare_version(&dxf, acadrust::DxfVersion::AC1032, true).unwrap();
         let text = String::from_utf8(utf8).unwrap();
         assert!(text.contains("\r\nAção\r\n") && text.contains("$ACADVER\r\n  1\r\nAC1032\r\n"), "{text}");
-        let legacy = native::declare_version(&dxf, acadrust::DxfVersion::AC1018).unwrap();
+        let legacy = native::declare_version(&dxf, acadrust::DxfVersion::AC1018, true).unwrap();
         assert!(legacy.windows(4).any(|w| w == b"A\xe7\xe3o"), "the code page bytes stay");
         assert!(legacy.windows(6).any(|w| w == b"AC1018"));
         // A code page it doesn't know is read as Windows-1252, as acadrust reads an older DXF.
         let at = dxf.windows(9).position(|w| w == b"ANSI_1252").unwrap();
         let unknown = [&dxf[..at], b"NO_SUCH_CP".as_slice(), &dxf[at + 9..]].concat();
-        let text = String::from_utf8(native::declare_version(&unknown, acadrust::DxfVersion::AC1032).unwrap()).unwrap();
+        let text = String::from_utf8(native::declare_version(&unknown, acadrust::DxfVersion::AC1032, true).unwrap()).unwrap();
         assert!(text.contains("\r\nAção\r\n"), "{text}");
         // Without a `$DWGCODEPAGE` there is nothing to decode it by: it is read as it is.
         let none = [&dxf[..at - 21], &dxf[at + 11..]].concat();
         assert!(!none.windows(12).any(|w| w == b"$DWGCODEPAGE"), "{}", String::from_utf8_lossy(&none));
-        assert_eq!(native::declare_version(&none, acadrust::DxfVersion::AC1032), None);
+        assert_eq!(native::declare_version(&none, acadrust::DxfVersion::AC1032, true), None);
     }
 
     /// An unknown kept version converts as [`dxf_to_dwg_as`] does.
