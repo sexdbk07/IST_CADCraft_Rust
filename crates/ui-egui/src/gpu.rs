@@ -41,8 +41,8 @@ const POINT_SIZE: f32 = 1.5;
 /// The canvas hides the OS pointer and draws its own crosshair, so every frame the swapchain holds
 /// back is visible as cursor lag. With FIFO (vsync) wgpu asks for one queued frame, but Vulkan
 /// clamps that to the driver's minimum swapchain size, which is three images on X11 (two frames
-/// queued behind the one on screen; Windows DX12 honours one). `low_latency` (the
-/// app passes it on Linux/BSD) prefers a mode that never queues: `AutoNoVsync` picks Immediate,
+/// queued behind the one on screen; Windows DX12 honours one, still a frame or two of lag that
+/// iStCAD users noticed). `low_latency` (the app passes it on Windows and Linux/BSD) prefers a mode that never queues: `AutoNoVsync` picks Immediate,
 /// then Mailbox, then falls back to FIFO, so it is valid on every surface; under a compositor the
 /// compositor still syncs to the display. `vsync` is the `CADCRAFT_VSYNC` override: `1`/`on`
 /// forces FIFO (tear-free without a compositor), `0`/`off` forces the low-latency mode.

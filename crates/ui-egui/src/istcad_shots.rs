@@ -275,3 +275,44 @@ fn istcad_properties_pick_a_point_for_coordinates() {
     });
     assert_eq!(center, Some((123.0, 45.0)));
 }
+
+/// Object snaps in the iStCAD window, as a user draws: LINE, the pointer a few pixels from a
+/// circle's centre and then from a line's end; each click lands exactly on the snapped point.
+#[test]
+fn istcad_line_snaps_to_centre_and_end() {
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        istcad_app(),
+    );
+    h.run_steps(3);
+    let (centre, end) = {
+        let d = h.state().session.doc().unwrap();
+        let c = d.model.iter().find_map(|e| if let cadcraft_engine::doc::EntityKind::Circle(c) = &e.kind { Some(c.center.xy()) } else { None });
+        let l = d.model.iter().find_map(|e| if let cadcraft_engine::doc::EntityKind::Line(l) = &e.kind { Some(l.b.xy()) } else { None });
+        (c.expect("a circle"), l.expect("a line"))
+    };
+    h.state_mut().start("line");
+    h.run_steps(2);
+    let before = h.state().session.doc().unwrap().model.len();
+    for target in [centre, end] {
+        let xf = h.state().canvas.xf.expect("the canvas has drawn");
+        let at = xf.to_screen(target) + vec2(3.0, -2.0);
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(3);
+        assert!(h.state().canvas.snap.is_some(), "a snap is found 3 px from {target:?}");
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            h.run_steps(1);
+        }
+        h.run_steps(1);
+    }
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    let d = h.state().session.doc().unwrap();
+    assert_eq!(d.model.len(), before + 1, "one line drawn");
+    let Some(cadcraft_engine::doc::EntityKind::Line(l)) = d.model.last().map(|e| &e.kind) else { panic!("the last object is the line") };
+    assert!(l.a.xy().dist(centre) < 1e-9 && l.b.xy().dist(end) < 1e-9, "the line runs centre to end exactly: {l:?}");
+}

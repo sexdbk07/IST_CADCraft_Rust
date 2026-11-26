@@ -327,7 +327,13 @@ fn pickbox_half(pickbox: f64) -> Option<f32> {
 /// Draws the canvas cursor at `at`: the full crosshair with pickbox when idle, crosshair lines
 /// only at point prompts, and the pickbox square alone at command object-selection prompts.
 pub(super) fn draw_crosshair(app: &CadApp, p: &egui::Painter, rect: Rect, at: Pos2, pickbox: bool, ink: Color32) {
-    let st = Stroke::new(1.0, ink);
+    // One screen pixel wide, through the middle of the pixel under the pointer: at 125 % or 150 %
+    // display scaling a 1-point line at a fractional position spread over two pixels and the
+    // crosshair read blurred and off the pointer by half a pixel.
+    let ppp = p.ctx().pixels_per_point().max(0.25);
+    let centre = |v: f32| ((v * ppp).floor() + 0.5) / ppp;
+    let at = pos2(centre(at.x), centre(at.y));
+    let st = Stroke::new(1.0 / ppp, ink);
     let len = (rect.height() * app.session.settings.cursorsize as f32 / 100.0).max(12.0);
     let picking_in_cmd = pickbox && app.session.current_prompt().is_some_and(|pr| pr.picks_objects());
     let pb = if pickbox { pickbox_half(app.session.settings.pickbox).or(picking_in_cmd.then_some(1.5)) } else { None };

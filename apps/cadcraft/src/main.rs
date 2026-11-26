@@ -6,8 +6,8 @@
 //! `{"id":1,"method":"cmdline.input","params":{"text":"circle 0,0 5"}}` → `{"id":1,"ok":true,…}`.
 //! See `cadcraft_ui_egui::control` for the methods.
 //!
-//! `CADCRAFT_VSYNC=1` presents with vsync on Linux/BSD, where the default is the low-latency
-//! present mode (`CADCRAFT_VSYNC=0` selects that elsewhere); see `cadcraft_ui_egui::gpu::surface_config`.
+//! `CADCRAFT_VSYNC=1` presents with vsync on Windows and Linux/BSD, where the default is the
+//! low-latency present mode (`CADCRAFT_VSYNC=0` selects that on macOS); see `cadcraft_ui_egui::gpu::surface_config`.
 //!
 //! `log` records go to standard error and `<settings dir>/logs/cadcraft.log` (`RUST_LOG` sets the
 //! levels); see [`logging`]. The `CADCRAFT_*` variables are read once, at startup; see [`env`].
@@ -542,7 +542,9 @@ fn main() -> eframe::Result {
     if let Some(list) = &vars.font_fallback {
         cadcraft_engine::fonts::ttf::set_fallback_fonts(list);
     }
-    let surface = cadcraft_ui_egui::gpu::surface_config(vars.vsync, cfg!(all(unix, not(target_os = "macos"))));
+    // Windows too: under vsync the drawn crosshair trailed the hand by a frame or two (iStCAD
+    // users felt it as lag); the desktop compositor still keeps windowed frames tear-free.
+    let surface = cadcraft_ui_egui::gpu::surface_config(vars.vsync, cfg!(any(target_os = "windows", all(unix, not(target_os = "macos")))));
     // The window's render pass and the canvas's pipelines must agree on it; a mismatch is a wgpu
     // validation error.
     let stencil = stencil_bits(vars.stencil);
@@ -554,8 +556,8 @@ fn main() -> eframe::Result {
         .clone()
         .or_else(|| std::env::var_os("CADCRAFT_CONFIG_DIR").and_then(|_| vars.config_dir.as_ref().map(|d| d.join("app.ron"))));
     let mut options = eframe::NativeOptions {
-        // The crosshair is drawn by the app: present without a queue on Linux/BSD, where X11
-        // swapchains hold two frames back under vsync (`CADCRAFT_VSYNC=1` restores vsync).
+        // The crosshair is drawn by the app: present without a queue on Windows and Linux/BSD,
+        // where swapchains hold frames back under vsync (`CADCRAFT_VSYNC=1` restores vsync).
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(surface),
         persistence_path: persistence_path.clone(),
         ..window_options(restores_window(persistence_path.as_deref()), stencil)

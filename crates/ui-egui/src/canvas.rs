@@ -177,6 +177,9 @@ pub struct CanvasState {
     grip_editing: bool,
     /// The grip whose menu (Stretch, Add Vertex, Lengthen…) a right-click opened.
     pub(crate) grip_menu: Option<(Handle, usize)>,
+    /// The multifunctional grip the pointer rests on, since when (seconds), and the rect of its
+    /// hover menu once shown: AutoCAD opens the grip's options after a moment's hover.
+    pub(crate) grip_hover: Option<((Handle, usize), f64, Option<Rect>)>,
     /// Dynamic block grips of the selection (cached), the one being dragged, and the list grip
     /// whose choices are open (and whether it opened this frame).
     pub(crate) dyn_grips: crate::dyngrips::Cache,
@@ -1067,6 +1070,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         }
     }
     crate::dyngrips::menu(app, ui.ctx(), &xf);
+    if idle && !app.canvas.snap_menu && app.canvas.grip_menu.is_none() && app.canvas.press.is_none() {
+        grips::grip_hover_menu(app, ui.ctx(), &xf, if inside { hover_pos } else { None });
+    } else {
+        app.canvas.grip_hover = None;
+    }
     if idle && !app.canvas.snap_menu && app.canvas.grip_menu.is_some() {
         grip_menu(app, &resp);
     } else if (idle && !enter) || app.canvas.snap_menu {

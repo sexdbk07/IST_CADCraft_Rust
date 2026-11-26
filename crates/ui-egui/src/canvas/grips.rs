@@ -72,6 +72,63 @@ pub(super) fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
     }
 }
 
+/// How long the pointer rests on a multifunctional grip before its options show, in seconds.
+const GRIP_HOVER_DELAY: f64 = 0.35;
+
+/// AutoCAD's hover menu of a multifunctional grip: after the pointer rests on a grip with options
+/// (a polyline vertex, a line's end…), Stretch and the options show beside it; a click runs one
+/// as the right-click menu does. It stays while the pointer moves onto it.
+pub(super) fn grip_hover_menu(app: &mut CadApp, ctx: &egui::Context, xf: &Xf, hover: Option<Pos2>) {
+    let now = ctx.input(|i| i.time);
+    let under = grip_at(app, xf, hover).filter(|g| !grip_options(app, *g).is_empty());
+    let on_menu = |r: Option<Rect>| r.zip(hover).is_some_and(|(r, p)| r.expand(4.0).contains(p));
+    app.canvas.grip_hover = match (app.canvas.grip_hover.take(), under) {
+        (Some((g, since, r)), Some(u)) if g == u => Some((g, since, r)),
+        (Some((g, since, r)), _) if r.is_some() && on_menu(r) => Some((g, since, r)),
+        (_, Some(u)) => Some((u, now, None)),
+        (_, None) => None,
+    };
+    let Some((g, since, _)) = app.canvas.grip_hover else { return };
+    if now - since < GRIP_HOVER_DELAY {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(GRIP_HOVER_DELAY - (now - since) + 0.01));
+        return;
+    }
+    let Some(at) = app.session.state().ok().and_then(|st| st.doc.entity(g.0).and_then(|e| e.kind.grips().get(g.1).copied())).map(|p| xf.to_screen(p)) else {
+        app.canvas.grip_hover = None;
+        return;
+    };
+    let options = grip_options(app, g);
+    let vertex = options.contains(&cadcraft_engine::grips::GripAction::RemoveVertex);
+    let mut chosen: Option<Option<cadcraft_engine::grips::GripAction>> = None;
+    let shown = egui::Area::new(egui::Id::unique("grip_hover_menu")).order(egui::Order::Foreground).fixed_pos(at + vec2(10.0, 10.0)).show(ctx, |ui| {
+        egui::Frame::menu(ui.style()).show(ui, |ui| {
+            ui.set_min_width(130.0);
+            if ui.button(crate::i18n::t(if vertex { "Stretch Vertex" } else { "Stretch" })).clicked() {
+                chosen = Some(None);
+            }
+            for a in &options {
+                if ui.button(crate::i18n::t(a.label())).clicked() {
+                    chosen = Some(Some(*a));
+                }
+            }
+        });
+    });
+    if let Some((_, _, r)) = &mut app.canvas.grip_hover {
+        *r = Some(shown.response.rect);
+    }
+    let Some(choice) = chosen else { return };
+    app.canvas.grip_hover = None;
+    app.canvas.hot_grips = vec![g];
+    let r = app.session.start_grip_edit(&[g]).and_then(|()| match choice {
+        Some(a) => app.session.input(Input::Keyword(a.keyword().to_string())),
+        None => Ok(()),
+    });
+    if let Err(e) = r {
+        app.canvas.hot_grips.clear();
+        app.session.echo(e.to_string());
+    }
+}
+
 /// Polyline segment midpoint grips are rectangular; vertex grips remain square.
 pub(super) fn grip_rect(kind: &cadcraft_doc::EntityKind, count: usize, index: usize, center: Pos2, size: f32) -> Rect {
     // The grip list interleaves vertices and available segment midpoints, then any remaining vertices.

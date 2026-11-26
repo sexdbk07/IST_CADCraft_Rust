@@ -1105,15 +1105,16 @@ fn pin_button(ui: &mut egui::Ui, pinned: bool) -> egui::Response {
 
 // ---------------------------------------------------------------- command dock
 
-/// Row 5, 86 points: the command line over the layout tabs (4.35 parts of the width), the
-/// drafting toggles over the zoom controls (1.05 parts).
+/// Row 5, 86 points: the command line over the layout tabs (4.0 parts of the width), the
+/// drafting toggles over the zoom controls (1.4 parts).
 pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let frame =
         egui::Frame::NONE.fill(t.chrome).stroke(Stroke::new(1.0, t.cmd_border)).corner_radius(egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 });
     egui::Panel::bottom("ist_dock").exact_size(DOCK_H).frame(frame).show(ui, |ui| {
         let r = ui.max_rect();
-        let split = r.left() + r.width() * 4.35 / 5.4;
+        // iStCAD's 4.35 : 1.05, widened to 4.0 : 1.4 for AutoCAD's eight status toggles.
+        let split = r.left() + r.width() * 4.0 / 5.4;
         let left = Rect::from_min_max(pos2(r.left() + 8.0, r.top() + 5.0), pos2(split, r.bottom() - 2.0));
         let right = Rect::from_min_max(pos2(split + 8.0, r.top() + 5.0), pos2(r.right() - 14.0, r.bottom() - 2.0));
         let bar = Rect::from_min_size(left.min, vec2(left.width(), 40.0));
@@ -1425,13 +1426,17 @@ fn drafting_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
     if icon_button(ui, vec2(38.0, 36.0), look(Glyph::Settings, ink::ICON, 1.2, 22.0), "Drafting settings", false).clicked() {
         toggle = Some("ui.dialog.dsettings");
     }
-    // Right to left, so the row reads OSNAP ORTHO POLAR OTRACK DYN.
+    // Right to left, so the row reads as AutoCAD's status bar: SNAP ORTHO POLAR OSNAP OTRACK
+    // LWT DYN QP, iStCAD's five with AutoCAD's Snap, Lineweight and Quick Properties.
     for (label, on, cmd, tip) in [
-        ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer"),
-        ("OTRACK", s.otrack, "otrack", "Object tracking — click to toggle"),
-        ("POLAR", s.polarmode, "polar", "Polar tracking — click to toggle"),
-        ("ORTHO", s.orthomode, "ortho", "Ortho mode — click to toggle"),
-        ("OSNAP", s.osmode & mode::OFF == 0 && s.osmode != 0, "osnap", "Object Snap — click to toggle; right-click to choose snap modes"),
+        ("QP", s.qpmode, "qpmode", "Quick Properties when objects are selected — click to toggle"),
+        ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer (F12)"),
+        ("LWT", s.lwdisplay, "lwdisplay", "Show lineweights — click to toggle"),
+        ("OTRACK", s.otrack, "otrack", "Object tracking (F11) — click to toggle"),
+        ("OSNAP", s.osmode & mode::OFF == 0 && s.osmode != 0, "osnap", "Object Snap (F3) — click to toggle; right-click to choose snap modes"),
+        ("POLAR", s.polarmode, "polar", "Polar tracking (F10) — click to toggle"),
+        ("ORTHO", s.orthomode, "ortho", "Ortho mode (F8) — click to toggle"),
+        ("SNAP", s.snapmode, "snap", "Snap to the snap grid (F9) — click to toggle"),
     ] {
         ui.add_space(5.0);
         let w = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(8.0), Color32::WHITE).size().x + 8.0;
