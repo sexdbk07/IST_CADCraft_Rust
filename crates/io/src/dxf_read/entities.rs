@@ -1,7 +1,7 @@
 use super::common::{T, common, ocs, plan_of_tilted, run_points, tilted};
 use super::hatch::{CurvePoints, hatch};
 use super::mtext_dxf;
-use super::text::{attdef, attrib_modes, attrib_props, mtext_from, multiline_attrib, split_embedded, text_from};
+use super::text::{attdef, attrib_modes, attrib_props, mtext_from, multiline_attrib, split_embedded, attrib_text_from, text_from};
 use super::{
     Arc, Attrib, Circle, Common, DimKind, Dimension, Ellipse, EntityKind, Face3d, Handle, HashMap, Helix, HelixConstrain, Insert, Leader, Line,
     LwPolyline, MAX_FRAME_CHARS, Point, PolyVertex, Polyline3d, RawTag, RayLine, Rx, Solid, Spline, Table, TableCell, Tag, Tolerance, Unknown, Vec2,
@@ -647,7 +647,7 @@ pub(super) fn insert_attribs(recs: &[(String, &[Tag])], i: &mut usize, ins_layer
             let (own, embedded) = split_embedded(t2);
             let multiline = multiline_attrib(embedded, &common(&tt));
             let own = T(own);
-            let mut text = text_from(&own);
+            let mut text = attrib_text_from(&own);
             if let Some(m) = &multiline {
                 text.value.clone_from(&m.read_as);
             }

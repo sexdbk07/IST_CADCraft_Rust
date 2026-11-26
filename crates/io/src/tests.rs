@@ -4862,3 +4862,25 @@ fn attribute_on_layer_zero_keeps_its_layer() {
     assert_eq!(layer_of("OWN").as_deref(), Some("0"));
     assert_eq!(layer_of("INHERITED").as_deref(), Some("Walls"));
 }
+
+// An ATTRIB's group 73 is its field length; its vertical justification is group 74. Reading 73
+// first turned a field length of 2 into "middle" and dropped a real 74 = 2 behind a 73 = 0.
+#[test]
+fn attribute_vertical_justification_comes_from_group_74() {
+    let attrib = |tag: &str, h: i32, field_len: i32, v: i32| {
+        format!(
+            "0\nATTRIB\n8\n0\n100\nAcDbText\n10\n0\n20\n0\n30\n0\n40\n2.5\n1\nv\n72\n{h}\n11\n1\n21\n1\n31\n0\n\
+             100\nAcDbAttribute\n2\n{tag}\n70\n0\n73\n{field_len}\n74\n{v}\n"
+        )
+    };
+    let dxf = format!(
+        "0\nSECTION\n2\nENTITIES\n0\nINSERT\n8\n0\n66\n1\n2\nB\n10\n0\n20\n0\n30\n0\n{}{}0\nSEQEND\n0\nENDSEC\n0\nEOF\n",
+        attrib("MID", 4, 2, 0),
+        attrib("CEN", 1, 0, 2),
+    );
+    let d = read_dxf(dxf.as_bytes()).unwrap();
+    let ins = first(&d, |k| if let EntityKind::Insert(i) = k { Some(i.clone()) } else { None });
+    let valign = |tag: &str| ins.attribs.iter().find(|a| a.tag == tag).map(|a| a.text.valign);
+    assert_eq!(valign("MID"), Some(VAlign::Baseline));
+    assert_eq!(valign("CEN"), Some(VAlign::Middle));
+}

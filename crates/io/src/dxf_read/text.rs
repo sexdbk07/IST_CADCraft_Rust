@@ -93,6 +93,16 @@ pub(super) fn mtext_from(tags: &[Tag], c: &Common) -> MText {
 }
 
 pub(super) fn text_from(t: &T) -> Text {
+    text_with_valign(t, 73)
+}
+
+/// The text of an ATTRIB or ATTDEF. Their group 73 is the field length, so the vertical
+/// justification is read from group 74 alone.
+pub(super) fn attrib_text_from(t: &T) -> Text {
+    text_with_valign(t, 74)
+}
+
+fn text_with_valign(t: &T, valign_code: i32) -> Text {
     let h = match t.i(72).unwrap_or(0) {
         1 => HAlign::Center,
         2 => HAlign::Right,
@@ -101,7 +111,7 @@ pub(super) fn text_from(t: &T) -> Text {
         5 => HAlign::Fit,
         _ => HAlign::Left,
     };
-    let v = match t.i(73).or_else(|| t.i(74)).unwrap_or(0) {
+    let v = match t.i(valign_code).unwrap_or(0) {
         1 => VAlign::Bottom,
         2 => VAlign::Middle,
         3 => VAlign::Top,
@@ -163,7 +173,7 @@ pub(super) fn attdef(tags: &[Tag], c: &Common) -> Attrib {
     let (own, embedded) = split_embedded(tags);
     let multiline = multiline_attrib(embedded, c);
     let own = T(own);
-    let mut text = text_from(&own);
+    let mut text = attrib_text_from(&own);
     if let Some(m) = &multiline {
         text.value.clone_from(&m.read_as);
     }
