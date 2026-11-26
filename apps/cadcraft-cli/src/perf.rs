@@ -118,7 +118,8 @@ fn perf_file(path: &std::path::Path, io: &mut Streams) -> Result {
     let _ = cache.build(d, space, &extents);
     let first_ms = ms(t);
     let mut edited = (**d).clone();
-    if let Some(h) = edited.model.iter().nth(edited.model.len() / 2).map(|e| e.handle) {
+    let middle = edited.model.iter().nth(edited.model.len() / 2).map(|e| e.handle);
+    if let Some(h) = middle {
         edited.model.modify(h, |e| e.common.visible = !e.common.visible);
     }
     let edited = std::sync::Arc::new(edited);
