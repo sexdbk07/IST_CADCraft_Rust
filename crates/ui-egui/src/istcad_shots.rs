@@ -211,3 +211,37 @@ fn istcad_properties_contents_take_several_lines() {
     h.run_steps(3);
     assert_eq!(contents(&h).as_deref(), Some("ONE\\PTWO"));
 }
+
+/// A block reference's attributes are listed by tag and edited in place.
+#[test]
+fn istcad_properties_edit_block_attributes() {
+    let mut app = istcad_app();
+    let _ = app.run("new", json!({}));
+    app.run("attdef", json!({ "tag": "PARTNO", "default": "A-1", "at": [0, 1] })).unwrap();
+    app.run("line", json!({ "points": [[0, 0], [10, 0]] })).unwrap();
+    let hs: Vec<String> = app.session.doc().unwrap().model.iter().map(|e| e.handle.hex()).collect();
+    app.run("block", json!({ "name": "TAGGED", "base": [0, 0], "handles": hs, "keep": "delete" })).unwrap();
+    let r = app.run("insert", json!({ "name": "TAGGED", "at": [20, 0] })).unwrap();
+    let i = r["handle"].as_str().unwrap().to_string();
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        app,
+    );
+    let _ = h.state_mut().run("select", json!({ "handles": [i] }));
+    let _ = h.state_mut().run("ui.istcad.properties", json!({ "on": true }));
+    h.run_steps(4);
+    let at = text_pos(&h, "PARTNO").expect("the attribute's tag is a row");
+    click(&mut h, at + vec2(150.0, 6.0));
+    h.run_steps(3);
+    h.event(egui::Event::Text("B-2".into()));
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let value = h.state().session.doc().unwrap().model.iter().find(|e| e.handle.hex() == i).and_then(|e| match &e.kind {
+        cadcraft_engine::doc::EntityKind::Insert(ins) => ins.attribs.first().map(|a| a.text.value.clone()),
+        _ => None,
+    });
+    assert_eq!(value.as_deref(), Some("B-2"));
+}

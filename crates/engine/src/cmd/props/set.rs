@@ -455,6 +455,8 @@ pub(super) fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                 EntityKind::Insert(i) => insert(i, &c, &mut used),
                 EntityKind::Dimension(dm) => dimension(dm, &c, h, &mut used),
                 EntityKind::Hatch(ha) => hatch(ha, &c, &mut used),
+                EntityKind::Spline(sp) => spline(sp, &c, &mut used),
+                EntityKind::Ray(r) | EntityKind::XLine(r) => ray(r, &c, &mut used),
                 _ => {}
             }
         })?;
@@ -574,6 +576,54 @@ fn leader<'c>(l: &mut cadcraft_doc::Leader, c: &'c Call<'_>, used: &mut Used<'c>
             used.insert("vertexY");
         }
         used.insert("vertex");
+    }
+}
+
+/// A spline's Closed and its vertices: fit points when it has them (the spline is fitted again
+/// through them, as SPLINEDIT does), else control vertices.
+fn spline(sp: &mut cadcraft_geom::Spline, c: &Call<'_>, used: &mut Used<'_>) {
+    let fitted = !sp.fit.is_empty();
+    if let Some(closed) = c.p.get("closed").and_then(Value::as_bool)
+        && fitted
+    {
+        *sp = sp.refit(&sp.fit.clone(), closed);
+        used.insert("closed");
+    }
+    let (x, y) = (c.num("vertexX"), c.num("vertexY"));
+    if x.is_none() && y.is_none() {
+        return;
+    }
+    let Some(i) = vertex_index(c) else { return };
+    let points = if fitted { &mut sp.fit } else { &mut sp.control };
+    let Some(v) = points.get_mut(i) else { return };
+    if let Some(x) = x {
+        v.x = x;
+        used.insert("vertexX");
+    }
+    if let Some(y) = y {
+        v.y = y;
+        used.insert("vertexY");
+    }
+    used.insert("vertex");
+    if fitted {
+        *sp = sp.refit(&sp.fit.clone(), sp.closed);
+    }
+}
+
+/// A ray's or construction line's Basepoint and Second point (the direction is kept unit length).
+fn ray(r: &mut cadcraft_doc::RayLine, c: &Call<'_>, used: &mut Used<'_>) {
+    let second = r.base.xy() + r.dir.xy();
+    set_coords(&mut r.base, c, ["basePointX", "basePointY", "basePointZ"], used);
+    let to = Vec2::new(c.num("secondPointX").unwrap_or(second.x), c.num("secondPointY").unwrap_or(second.y));
+    let moved_second = c.num("secondPointX").is_some() || c.num("secondPointY").is_some();
+    // A moved basepoint keeps the direction; a moved second point turns it.
+    if moved_second {
+        let d = to - r.base.xy();
+        if d.len() > 1e-12 {
+            let u = d.normalized();
+            r.dir = Vec3::new(u.x, u.y, 0.0);
+            used.extend(["secondPointX", "secondPointY"].into_iter().filter(|k| c.num(k).is_some()));
+        }
     }
 }
 
@@ -1077,5 +1127,59 @@ fn hatch(ha: &mut Hatch, c: &Call<'_>, used: &mut Used<'_>) {
     if let Some(x) = c.num("angle") {
         ha.angle = x.to_radians();
         used.insert("angle");
+    }
+    for (k, x) in [("originX", true), ("originY", false)] {
+        if let Some(v) = c.num(k) {
+            if x {
+                ha.origin.x = v;
+            } else {
+                ha.origin.y = v;
+            }
+            used.insert(k);
+        }
+    }
+    if let Some(z) = c.num("elevation") {
+        ha.elevation = z;
+        used.insert("elevation");
+    }
+    // Island detection: Normal (0), Outer (1) or Ignore (2).
+    if let Some(n) = c.p.get("islandStyle").and_then(Value::as_u64).filter(|n| *n <= 2) {
+        ha.style = n as u8;
+        used.insert("islandStyle");
+    }
+    // A hatch can lose its association with its boundary here, not gain one.
+    if c.p.get("associative").and_then(Value::as_bool) == Some(false) {
+        ha.associative = false;
+        used.insert("associative");
+    }
+    // The background colour behind a pattern: a colour, or "None".
+    if let Some(v) = c.p.get("background") {
+        if v.as_str().is_some_and(|t| t.trim().eq_ignore_ascii_case("none")) {
+            ha.background = None;
+            used.insert("background");
+        } else if let Some(col) = super::parse_color(v) {
+            ha.background = Some(col);
+            used.insert("background");
+        }
+    }
+    if let Some(g) = &mut ha.gradient {
+        for (k, first) in [("gradientColor1", true), ("gradientColor2", false)] {
+            if let Some(col) = c.p.get(k).and_then(super::parse_color) {
+                if first {
+                    g.color1 = col;
+                } else {
+                    g.color2 = col;
+                }
+                used.insert(k);
+            }
+        }
+        if let Some(x) = c.num("gradientAngle") {
+            g.angle = x.to_radians();
+            used.insert("gradientAngle");
+        }
+        if let Some(on) = c.p.get("centered").and_then(Value::as_bool) {
+            g.centered = on;
+            used.insert("centered");
+        }
     }
 }

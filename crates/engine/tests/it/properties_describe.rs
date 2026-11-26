@@ -403,3 +403,33 @@ fn a_multileader_s_block_content_is_edited() {
     assert_eq!((row(&rows, "Block", "sourceBlock")["value"].as_str(), num(&rows, "Block", "blockScale")), (Some("B"), 2.0));
     assert!((num(&rows, "Block", "blockRotation") - 30.0).abs() < 1e-9);
 }
+
+#[test]
+fn splines_rays_and_hatches_have_their_rows() {
+    let mut s = Session::new();
+    s.execute("spline", &json!({ "fit": [[0, 0], [5, 5], [10, 0]] })).unwrap();
+    let sp = last(&s);
+    let before = describe(&mut s, json!({ "handles": [sp] }));
+    assert_eq!(row(&before, "Geometry", "closed")["editable"], true);
+    let r = s.execute("properties.set", &json!({ "handles": [sp], "vertex": 2, "vertexY": 20 })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let after = describe(&mut s, json!({ "handles": [sp] }));
+    assert!(num(&after, "Geometry", "length") > num(&before, "Geometry", "length"));
+
+    s.execute("ray", &json!({ "base": [0, 0], "through": [1, 0] })).unwrap();
+    let ray = last(&s);
+    s.execute("properties.set", &json!({ "handles": [ray], "secondPointX": 0, "secondPointY": 3 })).unwrap();
+    let rows = describe(&mut s, json!({ "handles": [ray] }));
+    assert!((num(&rows, "Geometry", "directionY") - 1.0).abs() < 1e-9, "the ray turns to the second point: {rows}");
+
+    s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
+    let r = s.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "ANSI31" })).unwrap();
+    let h = handle(&r);
+    let rows = describe(&mut s, json!({ "handles": [h] }));
+    assert!((num(&rows, "Geometry", "area") - 100.0).abs() < 1e-6, "{rows}");
+    let r = s.execute("properties.set", &json!({ "handles": [h], "originX": 2, "islandStyle": 2, "background": 3, "associative": false })).unwrap();
+    assert_eq!(r["ignored"], json!([]), "{r}");
+    let rows = describe(&mut s, json!({ "handles": [h] }));
+    assert_eq!((num(&rows, "Pattern", "originX"), row(&rows, "Pattern", "islandStyle")["display"].as_str()), (2.0, Some("Ignore")));
+    assert_ne!(row(&rows, "Pattern", "background")["value"], "None");
+}

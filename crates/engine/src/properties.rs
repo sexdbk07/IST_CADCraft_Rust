@@ -920,6 +920,45 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
             },
         ];
     }
+    if let Some(sps) = all_of(ents, |k| if let EntityKind::Spline(x) = k { Some(x) } else { None }) {
+        let closed = c.row("closed", "Closed", Kind::Bool, sps.iter().map(|sp| json!(sp.closed)));
+        // Closed is changed by fitting again, so only splines with fit points take it.
+        let closed = if sps.iter().all(|sp| !sp.fit.is_empty()) {
+            closed
+        } else {
+            Row { note: Some("Only a spline with fit points can be opened or closed here.".into()), ..closed.read_only() }
+        };
+        let length = |sp: &cadcraft_geom::Spline| if sp.is_valid() { sp.checked_length().map_or(Value::Null, n) } else { Value::Null };
+        let area = |sp: &cadcraft_geom::Spline| {
+            if !sp.is_valid() {
+                return Value::Null;
+            }
+            let b = sp.bounds();
+            n(cadcraft_geom::shoelace(&sp.tessellate_spans((b.min.dist(b.max) * 1e-7).max(1e-12))).abs())
+        };
+        return vec![geometry(vec![
+            c.row("degree", "Degree", Kind::Number, sps.iter().map(|sp| json!(sp.degree))).read_only(),
+            closed,
+            c.row("controlVertices", "Control vertices", Kind::Number, sps.iter().map(|sp| json!(sp.control.len()))).read_only(),
+            c.row("fitPoints", "Fit points", Kind::Number, sps.iter().map(|sp| json!(sp.fit.len()))).read_only(),
+            c.row("length", "Length", Kind::Distance, sps.iter().copied().map(length)).read_only(),
+            c.row("area", "Area", Kind::Number, sps.iter().copied().map(area)).read_only(),
+        ])];
+    }
+    if let Some(rs) = all_of(ents, |k| match k {
+        EntityKind::Ray(x) | EntityKind::XLine(x) => Some(x),
+        _ => None,
+    }) {
+        return vec![geometry(vec![
+            c.row("basePointX", "Basepoint X", Kind::Distance, rs.iter().map(|r| n(r.base.x))),
+            c.row("basePointY", "Basepoint Y", Kind::Distance, rs.iter().map(|r| n(r.base.y))),
+            c.row("basePointZ", "Basepoint Z", Kind::Distance, rs.iter().map(|r| n(r.base.z))),
+            c.row("secondPointX", "Second point X", Kind::Distance, rs.iter().map(|r| n(r.base.x + r.dir.x))),
+            c.row("secondPointY", "Second point Y", Kind::Distance, rs.iter().map(|r| n(r.base.y + r.dir.y))),
+            c.row("directionX", "Direction vector X", Kind::Number, rs.iter().map(|r| n(r.dir.x))).read_only(),
+            c.row("directionY", "Direction vector Y", Kind::Number, rs.iter().map(|r| n(r.dir.y))).read_only(),
+        ])];
+    }
     if let Some(ls) = all_of(ents, |k| if let EntityKind::Leader(x) = k { Some(x) } else { None }) {
         let arrows = vec![Choice::new(json!(true), "Arrowhead"), Choice::new(json!(false), "None")];
         return vec![
@@ -943,15 +982,41 @@ fn shape_groups(c: &Ctx, ents: &[&Entity]) -> Vec<Group> {
             .map(|name| Choice::new(json!(name), name))
             .collect();
         let name = |h: &cadcraft_doc::Hatch| if h.solid { "SOLID".to_string() } else { h.pattern.to_ascii_uppercase() };
-        return vec![Group {
+        let kind = |h: &cadcraft_doc::Hatch| json!(if h.gradient.is_some() { "Gradient" } else if h.solid { "Solid" } else { "Pattern" });
+        let islands = vec![Choice::new(json!(0), "Normal"), Choice::new(json!(1), "Outer"), Choice::new(json!(2), "Ignore")];
+        let color = |c: &cadcraft_doc::color::Color| json!(c.name());
+        let mut groups = vec![Group {
             name: "Pattern",
             rows: vec![
+                c.row("type", "Type", Kind::Text, hs.iter().copied().map(kind)).read_only(),
                 c.choice("pattern", "Pattern name", Kind::Choice, patterns, hs.iter().map(|h| json!(name(h)))).quick(),
                 c.row("angle", "Angle", Kind::Angle, hs.iter().map(|h| n(h.angle.to_degrees()))),
                 c.row("scale", "Scale", Kind::Number, hs.iter().map(|h| n(h.scale))),
-                c.row("associative", "Associative", Kind::Bool, hs.iter().map(|h| json!(h.associative))).read_only(),
+                c.row("originX", "Origin X", Kind::Distance, hs.iter().map(|h| n(h.origin.x))),
+                c.row("originY", "Origin Y", Kind::Distance, hs.iter().map(|h| n(h.origin.y))),
+                c.row("background", "Background color", Kind::Color, hs.iter().map(|h| h.background.as_ref().map_or(json!("None"), color))),
+                // Associativity can be removed here, not restored.
+                c.row("associative", "Associative", Kind::Bool, hs.iter().map(|h| json!(h.associative))),
+                c.choice("islandStyle", "Island detection style", Kind::Choice, islands, hs.iter().map(|h| json!(h.style.min(2)))),
             ],
         }];
+        if let Some(gs) = hs.iter().map(|h| h.gradient.as_ref()).collect::<Option<Vec<_>>>() {
+            groups.push(Group {
+                name: "Gradient",
+                rows: vec![
+                    c.row("gradientName", "Gradient name", Kind::Text, gs.iter().map(|g| json!(g.name))).read_only(),
+                    c.row("gradientColor1", "Color 1", Kind::Color, gs.iter().map(|g| color(&g.color1))),
+                    c.row("gradientColor2", "Color 2", Kind::Color, gs.iter().map(|g| color(&g.color2))),
+                    c.row("gradientAngle", "Gradient angle", Kind::Angle, gs.iter().map(|g| n(g.angle.to_degrees()))),
+                    c.row("centered", "Centered", Kind::Bool, gs.iter().map(|g| json!(g.centered))),
+                ],
+            });
+        }
+        groups.push(geometry(vec![
+            c.row("elevation", "Elevation", Kind::Distance, hs.iter().map(|h| n(h.elevation))),
+            c.row("area", "Area", Kind::Number, hs.iter().map(|h| n(hatch_area(h)))).read_only(),
+        ]));
+        return groups;
     }
     Vec::new()
 }
@@ -1013,4 +1078,20 @@ fn mleader_groups(c: &Ctx, ents: &[&Entity], ms: &[&cadcraft_doc::MLeader]) -> V
         ],
     });
     groups
+}
+
+/// A hatch's area as drawn: odd parity, so a loop inside an odd number of others is an unfilled
+/// island (as AREA measures it).
+fn hatch_area(h: &cadcraft_doc::Hatch) -> f64 {
+    let geoms: Vec<cadcraft_geom::Polyline> = h.loops.iter().map(|l| cadcraft_geom::Polyline { vertices: l.vertices.clone(), closed: true }).collect();
+    let polys: Vec<Vec<cadcraft_geom::Vec2>> = geoms.iter().map(|g| g.tessellate(1e-3)).collect();
+    geoms
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let probe = polys.get(i).and_then(|p| p.first().copied());
+            let depth = probe.map_or(0, |pt| polys.iter().enumerate().filter(|(j, q)| *j != i && cadcraft_geom::point_in_polygon(q, pt)).count());
+            if depth % 2 == 0 { g.area().abs() } else { -g.area().abs() }
+        })
+        .sum()
 }

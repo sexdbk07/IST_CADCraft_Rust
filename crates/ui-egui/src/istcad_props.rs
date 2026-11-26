@@ -51,6 +51,8 @@ enum Edit {
     /// No selection: a setting for new objects (current layer, color, linetype…), set by running
     /// `cmd` with `base` and `{param: value}`; picked from `choices`, or typed when there are none.
     Current { cmd: &'static str, base: Value, param: &'static str, choices: Vec<(Value, String)> },
+    /// A block reference's attribute value, by tag: ATTEDIT.
+    Attribute(String),
     /// A polyline's Current vertex, one of `n`.
     Vertex(usize),
     /// The current vertex's X (or Y): `properties.set {vertex, vertexX | vertexY}`.
@@ -326,6 +328,10 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
             out.push(Section { title: g.name, open_by_default: true, rows });
         }
     }
+    let attributes = attribute_rows(doc, handles);
+    if !attributes.is_empty() {
+        out.push(Section { title: "Attributes", open_by_default: true, rows: attributes });
+    }
     // The view: typing a centre or height zooms there (ZOOM Center).
     let view_rows = view
         .map(|v| {
@@ -342,7 +348,32 @@ fn sections(doc: &Drawing, handles: &[Handle], view: Option<cadcraft_engine::Vie
     out
 }
 
-/// One polyline's or leader's Current vertex (a list to step through) and that vertex's X and
+/// Block references' attributes, as AutoCAD's Attributes group lists them: each tag the first
+/// reference has, with its value ("Multiple" where the references differ), edited through
+/// ATTEDIT; a constant attribute can't be.
+fn attribute_rows(doc: &Drawing, handles: &[Handle]) -> Vec<PropRow> {
+    use cadcraft_engine::doc::EntityKind;
+    let inserts: Vec<&cadcraft_engine::doc::Insert> =
+        handles.iter().filter_map(|h| doc.entity(*h)).filter_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i) } else { None }).collect();
+    if inserts.len() != handles.len() {
+        return Vec::new();
+    }
+    let Some(first) = inserts.first() else { return Vec::new() };
+    first
+        .attribs
+        .iter()
+        .map(|a| {
+            let values: Vec<Option<&str>> =
+                inserts.iter().map(|i| i.attribs.iter().find(|b| b.tag.eq_ignore_ascii_case(&a.tag)).map(|b| b.text.value.as_str())).collect();
+            let same = values.iter().all(|v| *v == Some(a.text.value.as_str()));
+            let value = if same { a.text.value.clone() } else { "Multiple".to_string() };
+            let edit = if a.constant { Edit::ReadOnly } else { Edit::Attribute(a.tag.clone()) };
+            PropRow::new(&a.tag, value, edit)
+        })
+        .collect()
+}
+
+/// One polyline's, leader's or spline's Current vertex (a list to step through) and that vertex's X and
 /// Y, as AutoCAD's palette shows them first under Geometry.
 fn vertex_rows(doc: &Drawing, handles: &[Handle], vertex: usize, units: &Units) -> Vec<PropRow> {
     use cadcraft_engine::doc::EntityKind;
@@ -350,6 +381,8 @@ fn vertex_rows(doc: &Drawing, handles: &[Handle], vertex: usize, units: &Units) 
     let points: Vec<(f64, f64)> = match doc.entity(*h).map(|e| &e.kind) {
         Some(EntityKind::LwPolyline(pl)) => pl.vertices.iter().map(|v| (v.p.x, v.p.y)).collect(),
         Some(EntityKind::Leader(l)) => l.vertices.iter().map(|v| (v.x, v.y)).collect(),
+        // A spline's fit points when it has them (it is fitted again), else its control vertices.
+        Some(EntityKind::Spline(sp)) => (if sp.fit.is_empty() { &sp.control } else { &sp.fit }).iter().map(|v| (v.x, v.y)).collect(),
         _ => return Vec::new(),
     };
     let n = points.len();
@@ -396,6 +429,13 @@ fn from_desc(label: &str, r: &DescRow, choices: Vec<(Value, String)>) -> PropRow
         Edit::ReadOnly
     } else if !choices.is_empty() {
         Edit::Choice(r.key, choices)
+    } else if matches!(r.key, "background" | "gradientColor1" | "gradientColor2") {
+        // Hatch colours pick from the palette's colours (a background can also be None).
+        let mut list = color_choices();
+        if r.key == "background" {
+            list.insert(0, (json!("None"), "None".to_string()));
+        }
+        Edit::Choice(r.key, list)
     } else {
         match r.kind {
             Kind::Bool => Edit::Toggle(r.key, r.value.as_bool().unwrap_or(false)),
@@ -544,7 +584,7 @@ fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, hand
                 app.istcad.props.vertex = i;
             }
         }
-        Edit::Number(_) | Edit::Text(_) | Edit::Contents(_) | Edit::Current { .. } | Edit::VertexCoord { .. } | Edit::View { .. } => {
+        Edit::Number(_) | Edit::Text(_) | Edit::Contents(_) | Edit::Attribute(_) | Edit::Current { .. } | Edit::VertexCoord { .. } | Edit::View { .. } => {
             if resp.clicked() {
                 let start = if row.value == "Multiple" {
                     String::new()
@@ -668,6 +708,19 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
                 return;
             };
             json!({ *key: v })
+        }
+        Edit::Attribute(tag) => {
+            // Each reference's value, as ATTEDIT sets it.
+            for h in handles {
+                let mut values = serde_json::Map::new();
+                values.insert(tag.clone(), json!(typed));
+                if let Err(e) = app.run("attedit", json!({ "handle": h.hex(), "values": values })) {
+                    app.set_status(e);
+                    break;
+                }
+            }
+            app.canvas.list = None;
+            return;
         }
         Edit::VertexCoord { x, index } => {
             let Some(v) = number(&typed) else {

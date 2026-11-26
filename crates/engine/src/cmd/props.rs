@@ -29,7 +29,10 @@ pub fn specs() -> Vec<CommandSpec> {
              vertex (1 = first) with vertexX?/vertexY?, block reference: name? (another block), positionX/Y/Z?, scaleX/Y/Z?, \
              leader: dimStyle?, arrow?: bool, leaderType?: straight|spline, vertex with vertexX?/vertexY?, \
              multileader: mleaderStyle?, leaderType?, arrowheadSize?, horizontalLanding?: bool, landingDistance?, landingX/Y?, its text as mtext's keys, \
-             sourceBlock?, blockScale?, blockRotation? (block content), point: positionX/Y/Z?, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
+             sourceBlock?, blockScale?, blockRotation? (block content), point: positionX/Y/Z?, \
+             spline: closed? (fit splines), vertex with vertexX?/vertexY? (fit points, else control vertices), ray and xline: basePointX/Y/Z?, secondPointX/Y?, \
+             hatch: pattern?, angle?, scale?, originX/Y?, elevation?, islandStyle?: 0|1|2, associative?: false, background?: colour | \"None\", \
+             gradientColor1/2?, gradientAngle?, centered?, text: style?, justify?, oblique?, positionX/Y/Z?, alignmentX/Y?, \
              mtext: style?, justify?, lineSpacing?, lineSpacingDistance?, lineSpacingStyle?: atLeast | exactly, positionX/Y/Z?, \
              dimension: dimStyle?, textOverride?, textRotation?, textPositionX/Y?, prefix?, suffix?, altPrefix?, altSuffix?, dimScale?, precision?, \
              <dimension style variables (field or DIM* name, e.g. textHeight / DIMTXT) set as overrides of each dimension>, clearOverrides?, clear?: [variable]} \
