@@ -500,7 +500,7 @@ fn a_viewport_s_size_and_scale_are_edited() {
     let mut s = Session::new();
     s.execute("layout.set", &json!({ "name": "Layout1" })).unwrap();
     let r = s.execute("mview", &json!({ "p1": [10, 10], "p2": [110, 60] })).unwrap();
-    let v = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).expect("mview answers its viewport").to_string();
+    let v = r["viewports"][0].as_str().expect("mview answers its viewport").to_string();
     let r = s.execute("properties.set", &json!({ "handles": [v], "standardScale": 0.5, "locked": true })).unwrap();
     assert_eq!(r["ignored"], json!([]), "{r}");
     let rows = describe(&mut s, json!({ "handles": [v] }));

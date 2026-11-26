@@ -38,7 +38,7 @@ const TOOLBAR_H: f32 = 50.0;
 const TABS_H: f32 = 28.0;
 const DOCK_H: f32 = 86.0;
 /// Height of the command history window that opens above the dock.
-const HISTORY_H: f32 = 196.0;
+const HISTORY_H: f32 = 137.0;
 /// How many commands the auto-hide strip offers.
 const QUICK_COUNT: usize = 20;
 
@@ -75,7 +75,15 @@ mod ink {
     pub const TOGGLE_ON_TEXT: Color32 = Color32::from_rgb(0x29, 0x2e, 0x36);
     /// The history window and the AutoComplete list.
     pub const HISTORY_BG: Color32 = Color32::from_rgba_unmultiplied_const(0x18, 0x22, 0x26, 0xf2);
-    pub const HISTORY_TEXT: Color32 = Color32::from_rgb(190, 196, 205);
+    pub const HISTORY_TEXT: Color32 = Color32::from_rgb(0xdc, 0xe2, 0xea);
+    /// AutoComplete (1.0.233 `CommandSuggestionPopup`): `#343A43`, border `#707780`.
+    pub const SUGGEST_BG: Color32 = Color32::from_rgb(0x34, 0x3a, 0x43);
+    pub const SUGGEST_EDGE: Color32 = Color32::from_rgb(0x70, 0x77, 0x80);
+    /// The edge toolbar open (`AutoHideButtons`): `#30363F`, border `#555B65`; its pin `#414750`.
+    pub const EDGE_BG: Color32 = Color32::from_rgb(0x30, 0x36, 0x3f);
+    pub const EDGE_BORDER: Color32 = Color32::from_rgb(0x55, 0x5b, 0x65);
+    pub const PIN_BG: Color32 = Color32::from_rgb(0x41, 0x47, 0x50);
+    pub const PIN_BORDER: Color32 = Color32::from_rgb(0x62, 0x69, 0x73);
     pub const LIST_EDGE: Color32 = Color32::from_rgb(0x70, 0x77, 0x80);
     pub const LIST_DESC: Color32 = Color32::from_rgb(0x9f, 0xad, 0xb2);
     pub const LIST_SELECTED: Color32 = Color32::from_rgb(0x5a, 0x60, 0x69);
@@ -124,6 +132,8 @@ pub struct Shell {
     usage: HashMap<String, u32>,
     /// The auto-hide strip is expanded.
     quick_open: bool,
+    /// The edge toolbar is pinned open (its 📌 toggle).
+    quick_pinned: bool,
     /// The view height each drawing first showed, the 100 % mark of the zoom readout.
     zoom_ref: HashMap<String, f64>,
     /// The window caption last sent, so it is only sent again when it changes.
@@ -1011,21 +1021,26 @@ pub fn canvas_frame(ctx: &egui::Context, area: Rect) {
 /// The auto-hide strip on the drawing area's left edge: a 12 × 58 handle (`#4A515B`, "›") that
 /// opens, on hover, a 60-point column of the 20 most-used commands (34 × 32 buttons).
 pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
-    let t = Tokens::get();
     let ranked = app.istcad.ranked();
-    let open_h = (ranked.len() as f32 * 34.0 + 10.0).min(area.height() - 8.0).max(58.0);
-    let (w, h) = if app.istcad.quick_open { (60.0, open_h) } else { (12.0, 58.0) };
+    // iStCAD 1.0.233: a 12 × 58 handle; open, a 53-wide strip (`#30363F`, border `#555B65`,
+    // padding 3, 5) with the pin toggle (25 high) over the commands.
+    let open_h = (ranked.len() as f32 * 34.0 + 25.0 + 4.0 + 14.0).min(area.height() - 8.0).max(58.0);
+    let open = app.istcad.quick_open || app.istcad.quick_pinned;
+    let (w, h) = if open { (53.0, open_h) } else { (12.0, 58.0) };
     let rect = Rect::from_min_size(pos2(area.left(), area.center().y - h / 2.0), vec2(w, h));
     let mut run = None;
+    let mut toggle_pin = false;
     let radius = egui::CornerRadius { nw: 0, sw: 0, ne: 3, se: 3 };
-    let open = app.istcad.quick_open;
+    let pinned = app.istcad.quick_pinned;
     let shell = &app.istcad;
-    egui::Area::new(egui::Id::unique("ist_quick_bar")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
-        let (fill, edge) = if open { (t.chrome, t.border) } else { (t.control_hover, ink::CANVAS_EDGE) };
-        let frame = egui::Frame::NONE.fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(radius);
+    egui::Area::new(egui::Id::new("ist_quick_bar")).order(egui::Order::Foreground).fixed_pos(rect.min).show(ctx, |ui| {
+        let t = Tokens::get();
+        let (fill, edge) = if open { (ink::EDGE_BG, ink::EDGE_BORDER) } else { (t.control_hover, ink::CANVAS_EDGE) };
+        let frame = egui::Frame::NONE.fill(fill).stroke(Stroke::new(1.0, edge)).corner_radius(radius).inner_margin(if open { egui::Margin::symmetric(3, 5) } else { egui::Margin::ZERO });
         frame.show(ui, |ui| {
-            ui.set_min_size(rect.size());
-            ui.set_max_size(rect.size());
+            let inner = if open { rect.size() - vec2(6.0, 10.0) } else { rect.size() };
+            ui.set_min_size(inner);
+            ui.set_max_size(inner);
             if !open {
                 let r = ui.max_rect();
                 ui.painter().text(r.center(), Align2::CENTER_CENTER, "›", FontId::proportional(19.0), Color32::from_rgb(0xd0, 0xd9, 0xdb));
@@ -1033,14 +1048,17 @@ pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
                 crate::icons::describe_control(ui, &resp, "Show drawing toolbar", None, false);
                 return;
             }
-            egui::ScrollArea::vertical().max_height(open_h - 6.0).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            if pin_button(ui, pinned).clicked() {
+                toggle_pin = true;
+            }
+            egui::ScrollArea::vertical().max_height(inner.y - 29.0).show(ui, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.add_space(4.0);
                     for id in &ranked {
                         let Some((_, caption, glyph)) = QUICK_CATALOG.iter().find(|c| c.0 == *id) else { continue };
                         let tip = format!("{} ({}) — used {} time(s)", crate::i18n::t(caption), id.to_ascii_uppercase(), shell.uses(id));
-                        if icon_button(ui, vec2(34.0, 32.0), look(*glyph, Color32::WHITE, 1.4, 20.0), &tip, false).clicked() {
+                        if icon_button(ui, vec2(40.0, 32.0), look(*glyph, Color32::WHITE, 1.4, 20.0), &tip, false).clicked() {
                             run = Some(*id);
                         }
                     }
@@ -1048,7 +1066,12 @@ pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
             });
         });
     });
-    // Open while the pointer is over the handle or the open strip.
+    if toggle_pin {
+        app.istcad.quick_pinned = !app.istcad.quick_pinned;
+        let on = app.istcad.quick_pinned;
+        app.session.echo(format!("Edge toolbar {}.", if on { "pinned" } else { "unpinned" }));
+    }
+    // Open while the pointer is over the handle or the open strip (or while pinned).
     let hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| rect.expand(2.0).contains(p));
     if hover != app.istcad.quick_open {
         app.istcad.quick_open = hover;
@@ -1057,6 +1080,27 @@ pub fn quick_bar(app: &mut CadApp, ctx: &egui::Context, area: Rect) {
     if let Some(id) = run {
         app.start(id);
     }
+}
+
+/// The edge toolbar's pin toggle: 25 high, `#414750` with a `#626973` border, a drawing pin
+/// standing up while pinned and tilted while not.
+fn pin_button(ui: &mut egui::Ui, pinned: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 25.0), Sense::click());
+    let t = Tokens::get();
+    let fill = if pinned { t.accent.gamma_multiply(0.55) } else if resp.hovered() { t.control_hover } else { ink::PIN_BG };
+    let p = ui.painter();
+    p.rect(rect, 3.0, fill, Stroke::new(1.0, ink::PIN_BORDER), egui::StrokeKind::Inside);
+    let c = rect.center();
+    let ink_ = Color32::from_rgb(0xe1, 0xe3, 0xe8);
+    // Head, collar and needle; tilted 35° when not pinned.
+    let turn = if pinned { 0.0 } else { 35f32.to_radians() };
+    let rot = |v: egui::Vec2| c + egui::Vec2::new(v.x * turn.cos() - v.y * turn.sin(), v.x * turn.sin() + v.y * turn.cos());
+    p.circle_filled(rot(vec2(0.0, -4.0)), 3.6, ink_);
+    p.line_segment([rot(vec2(-4.5, -0.5)), rot(vec2(4.5, -0.5))], Stroke::new(1.6, ink_));
+    p.line_segment([rot(vec2(0.0, -0.5)), rot(vec2(0.0, 7.5))], Stroke::new(1.2, ink_));
+    let tip = if pinned { "Unpin the edge toolbar" } else { "Pin the edge toolbar open" };
+    crate::icons::describe_control(ui, &resp, "Pin / unpin edge toolbar", Some(pinned), false);
+    resp.on_hover_text(crate::i18n::t(tip))
 }
 
 // ---------------------------------------------------------------- command dock
@@ -1231,8 +1275,10 @@ fn latest_status(app: &CadApp) -> String {
 
 /// The command history window above the dock: "Command History" and the log, newest at the bottom.
 fn history_window(app: &CadApp, ctx: &egui::Context, at: egui::Pos2, width: f32, t: Tokens) {
+    // iStCAD 1.0.233 `CommandExpandedPanel`: 137 high, the canvas's width, `#F2182226`, the
+    // history in Consolas 12 `#DCE2EA`, selectable so Ctrl+C copies it.
     let radius = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
-    egui::Area::new(egui::Id::unique("ist_cmd_history")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("ist_cmd_history")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         egui::Frame::NONE
             .fill(ink::HISTORY_BG)
             .stroke(Stroke::new(1.0, ink::CANVAS_EDGE))
@@ -1243,33 +1289,54 @@ fn history_window(app: &CadApp, ctx: &egui::Context, at: egui::Pos2, width: f32,
                 ui.set_height(HISTORY_H - 24.0);
                 ui.label(RichText::new(crate::tl!("Command History")).size(12.0).strong().color(t.text));
                 ui.add_space(8.0);
+                let mut text = app.session.log.join("\n");
                 egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                    for entry in &app.session.log {
-                        ui.label(RichText::new(entry).size(12.0).color(ink::HISTORY_TEXT));
-                    }
+                    let edit = egui::TextEdit::multiline(&mut text)
+                        .interactive(true)
+                        .frame(egui::Frame::NONE)
+                        .font(FontId::monospace(12.0))
+                        .text_color(ink::HISTORY_TEXT)
+                        .desired_width(f32::INFINITY);
+                    let r = ui.add(edit);
+                    let _ = r.on_hover_text(crate::tl!("Select text and press Ctrl+C to copy command history"));
                 });
             });
     });
 }
 
-/// AutoComplete above the command line (430 wide): name and description per row, the first row
-/// selected (Enter or Space runs it, Tab completes it).
+/// AutoComplete above the command line, as iStCAD 1.0.233's `CommandSuggestionPopup`: `#343A43`,
+/// border `#707780`, radius 3, at most 260 × 190, each command's name in 10-point semibold, the
+/// first selected (Enter or Space runs it, Tab completes it).
 fn autocomplete(app: &mut CadApp, ctx: &egui::Context, bottom_left: egui::Pos2) {
     let sug = crate::cmdline::suggestions_for(&app.session, &app.cmd.buffer);
     if sug.is_empty() {
         return;
     }
-    let h = sug.len() as f32 * 28.0 + 6.0;
+    const ROW: f32 = 20.0;
+    let h = (sug.len() as f32 * ROW + 6.0).min(190.0);
     let mut run = None;
-    egui::Area::new(egui::Id::unique("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(bottom_left - vec2(0.0, h)).show(ctx, |ui| {
-        list_frame().show(ui, |ui| {
-            ui.set_width(426.0);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for (i, s) in sug.iter().enumerate() {
-                if suggestion_row(ui, &s.display, crate::i18n::t(s.label), i == 0).clicked() {
-                    run = Some(s.id.to_ascii_lowercase());
+    egui::Area::new(egui::Id::new("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(bottom_left - vec2(0.0, h + 2.0)).show(ctx, |ui| {
+        egui::Frame::NONE.fill(ink::SUGGEST_BG).stroke(Stroke::new(1.0, ink::SUGGEST_EDGE)).corner_radius(3).inner_margin(egui::Margin::same(2)).show(ui, |ui| {
+            let width = sug.iter().map(|s| ui.fonts_mut(|f| f.layout_no_wrap(s.display.clone(), FontId::proportional(10.0), Color32::WHITE).size().x)).fold(120.0_f32, f32::max);
+            ui.set_width((width + 24.0).min(254.0));
+            egui::ScrollArea::vertical().max_height(h - 6.0).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (i, s) in sug.iter().enumerate() {
+                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
+                    if i == 0 || resp.hovered() {
+                        ui.painter().rect_filled(rect, 2.0, if i == 0 { ink::LIST_SELECTED } else { Tokens::get().control_hover });
+                    }
+                    let p = ui.painter().with_clip_rect(rect);
+                    let mut job = egui::text::LayoutJob::simple_singleline(s.display.clone(), FontId::proportional(10.5), ink::HISTORY_TEXT);
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
+                    let galley = ui.fonts_mut(|f| f.layout_job(job));
+                    p.galley(pos2(rect.left() + 6.0, rect.center().y - galley.size().y / 2.0), galley, ink::HISTORY_TEXT);
+                    crate::icons::describe_control(ui, &resp, &s.display, Some(i == 0), false);
+                    if resp.on_hover_text(crate::i18n::t(s.label)).clicked() {
+                        run = Some(s.id.to_ascii_lowercase());
+                    }
                 }
-            }
+            });
         });
     });
     if let Some(id) = run {
