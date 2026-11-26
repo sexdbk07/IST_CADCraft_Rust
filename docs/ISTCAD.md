@@ -71,3 +71,21 @@ Space on an empty command line repeats the last command; Tab accepts an AutoComp
 - iStCAD's autosave folder `%LocalAppData%\iStCAD_1\Recovery`: CADCraft's own autosave and
   recovery are used instead.
 - iStCAD's ACadSharp DWG/DXF layer: CADCraft reads and writes DWG/DXF natively in Rust.
+
+## Performance work (DWG open, save and edit)
+
+Measured on three customer DWGs (3–11 MB, 3k–27k objects; files not in the repository) with
+`cadcraft-cli perf FILE` and `convert`, on a two-core Linux runner:
+
+| | Before | After |
+|---|---|---|
+| Display list after an edit (KC, 26.7k objects) | 62–66 ms, whole list | 8–10 ms, one 1024-object chunk (`ChunkCache`), same list |
+| GPU upload after an edit | whole mesh | only the changed chunk's buffers |
+| Save as DWG 2007 (KET_CAU_42B) | ~2.2 s | ~1.2 s |
+| Save as DWG 2007 (Q8, 10 MB) | ~1.8 s | ~1.35 s |
+
+Save output is byte-identical before and after (checked with `cadcraft-cli roundtrip`).
+What made saving slow (callgrind): a quadratic ENDBLK lookup per block, the drawing written
+three times for a 2007 file with legacy visual styles, and hex text of binary chunks normalised
+one character at a time. What remains is mostly acadrust's DXF reader and its 2007 page
+compressor in the DWG worker.
