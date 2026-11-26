@@ -141,3 +141,4 @@ winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457
 # The DWG bridge, vendored to use a newer acadrust (see vendor/craft-dwg/Cargo.toml).
 [patch."https://github.com/storytold/craft-libs"]
 craft-dwg = { path = "vendor/craft-dwg" }
+craft-dxf = { path = "vendor/craft-dxf" }

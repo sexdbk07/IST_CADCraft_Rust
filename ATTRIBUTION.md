@@ -121,6 +121,13 @@ shared dependency. Their source and hashes are retained below; notices are in `N
 ## Vendored: craft-dwg
 
 `vendor/craft-dwg/` is `crates/dwg` of [storytold/craft-libs](https://github.com/storytold/craft-libs)
-at 453b0da782ccef39be9a6dac8d27c80b553ef1cc (MIT OR Apache-2.0), unchanged except its
-`Cargo.toml`, which asks for acadrust 0.6.8 instead of craft-libs' pinned 0.6.6. acadrust
+at 453b0da782ccef39be9a6dac8d27c80b553ef1cc (MIT OR Apache-2.0). Its `Cargo.toml` asks for
+acadrust 0.6.8 instead of craft-libs' pinned 0.6.6, and `proxy_transport::text_pairs` and
+`legacy_field_formats` skip decoding work values don't need (speed only). acadrust
 (MPL-2.0, <https://github.com/hakanaktt/acadrust>) is used unmodified from crates.io.
+
+## Vendored: craft-dxf
+
+`vendor/craft-dxf/` is `crates/dxf` of [storytold/craft-libs](https://github.com/storytold/craft-libs)
+at 219c1d0b14177af6f291395d6587f61a5e09043a (MIT OR Apache-2.0), changed only in `normalize_hex`
+(clean hex text is copied whole; speed only). See `vendor/craft-dxf/README.md`.

@@ -129,6 +129,11 @@ fn head(tags: &[Tag]) -> Head {
     let mut h = Head::default();
     let mut group: Option<String> = None;
     for t in tags.iter().take_while(|t| t.code < 1000) {
+        // The handle, the reactor and extension dictionary groups and the owner come before the
+        // first subclass marker; a large record (a hatch, a mesh) needn't be read on past it.
+        if t.code == 100 && group.is_none() && h.handle.is_some() && h.owner.is_some() {
+            break;
+        }
         match (t.code, group.as_deref()) {
             (102, _) => {
                 let v = t.str();

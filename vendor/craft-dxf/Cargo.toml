@@ -1,0 +1,21 @@
+# craft-dxf from storytold/craft-libs at 219c1d0b14177af6f291395d6587f61a5e09043a (MIT OR Apache-2.0),
+# vendored by IST_CADCraft for a faster hex-text path (binary chunks, groups 310-319 and 1004);
+# see README.md.
+[package]
+name = "craft-dxf"
+description = "Standalone DXF tag reader/writer (ASCII and binary, pre-2007 code pages), from the published DXF reference"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/storytold/craft-libs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+craft-codepage = { git = "https://github.com/storytold/craft-libs", rev = "219c1d0b14177af6f291395d6587f61a5e09043a" }
+thiserror = "2"
+log = "0.4"
+encoding_rs = "0.8.35"
+kurbo = "0.13"
