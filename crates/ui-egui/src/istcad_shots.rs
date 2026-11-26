@@ -316,3 +316,45 @@ fn istcad_line_snaps_to_centre_and_end() {
     let Some(cadcraft_engine::doc::EntityKind::Line(l)) = d.model.last().map(|e| &e.kind) else { panic!("the last object is the line") };
     assert!(l.a.xy().dist(centre) < 1e-9 && l.b.xy().dist(end) < 1e-9, "the line runs centre to end exactly: {l:?}");
 }
+
+/// Object snap tracking as in AutoCAD: rest on a line's end to acquire it, move away along its
+/// horizontal, and the cursor follows the tracking path; a click lands on it.
+#[test]
+fn istcad_tracking_follows_an_acquired_point() {
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).with_step_dt(0.05).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        istcad_app(),
+    );
+    h.run_steps(3);
+    let end = h
+        .state()
+        .session
+        .doc()
+        .unwrap()
+        .model
+        .iter()
+        .find_map(|e| if let cadcraft_engine::doc::EntityKind::Line(l) = &e.kind { Some(l.b.xy()) } else { None })
+        .expect("a line");
+    assert!(h.state().session.settings.otrack, "OTRACK is on at start");
+    h.state_mut().start("line");
+    h.run_steps(2);
+    let xf = h.state().canvas.xf.expect("the canvas has drawn");
+    // Rest on the end long enough to acquire it (each step is 50 ms).
+    let on_end = xf.to_screen(end) + vec2(2.0, 1.0);
+    for _ in 0..14 {
+        h.event(egui::Event::PointerMoved(on_end));
+        h.run_steps(1);
+    }
+    // Then away to the right, 1.5 px off its horizontal.
+    let away = xf.to_screen(end) + vec2(90.0, 1.5);
+    for _ in 0..3 {
+        h.event(egui::Event::PointerMoved(away));
+        h.run_steps(1);
+    }
+    assert!(h.state().canvas.track.is_some(), "a tracking path from the acquired end");
+    let cursor = h.state().canvas.cursor.expect("a cursor");
+    assert!((cursor.y - end.y).abs() < 1e-9, "the cursor sits on the end's horizontal: {cursor:?} vs {end:?}");
+}

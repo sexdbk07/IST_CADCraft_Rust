@@ -5,8 +5,11 @@
 //! resize; the "PROPERTIES" title; the selection box ("No selection", the object type or "N
 //! objects selected", ⌄ to limit the rows to one type); then General, the groups the engine
 //! describes for the selected type (Geometry, Text, Pattern, a dimension's Lines & Arrows …
-//! Tolerances), View (closed) and Misc, each under a 24-point `#262B33` header bar with ◀ / ▼.
-//! Rows: the label (`#BEC4CD`) in 1 part and the value (`#E1E3E8`, right-aligned) in 1.15 parts.
+//! Tolerances), View (closed) and Misc, each under a 24-point `#262B33` category bar with
+//! AutoCAD's double chevron. The rows are AutoCAD's property grid: 22 high, a rule under each, the
+//! name left of a divider the user drags (45 % at first), the value left-aligned after it (a
+//! colour with its swatch, a list's arrow and a coordinate's pick button when pointed at), the
+//! row being edited marked blue.
 //!
 //! Editing works as in AutoCAD's palette: click a value to type a new one (Enter or leaving the
 //! field applies, Esc cancels) or to pick from its list; a Yes/No value flips. Every selected
@@ -26,7 +29,11 @@ use crate::theme::Tokens;
 
 /// Width of the palette column (iStCAD's `PropertiesColumn` when shown).
 pub const WIDTH: f32 = 296.0;
-const ROW_H: f32 = 30.0;
+/// AutoCAD's property grid: compact rows, a rule under each and a divider between the columns.
+const ROW_H: f32 = 22.0;
+const GRID_RULE: Color32 = Color32::from_rgb(0x3f, 0x46, 0x51);
+/// The row being edited or pointed at, as AutoCAD marks the current property.
+const ROW_ACTIVE: Color32 = Color32::from_rgb(0x2b, 0x5d, 0x8e);
 /// iStCAD 1.0.233's palette fill (`#313741`) and group header bar (`#262B33`, `#4A525E` rule).
 const PANEL_FILL: Color32 = Color32::from_rgb(0x31, 0x37, 0x41);
 const GROUP_FILL: Color32 = Color32::from_rgb(0x26, 0x2b, 0x33);
@@ -118,6 +125,9 @@ pub struct State {
     vertex: usize,
     /// A point being picked for a pair of coordinate rows.
     point: Option<PendingPoint>,
+    /// Where the label column ends, as a share of the width (the divider is dragged); 0: the
+    /// default.
+    split: f32,
 }
 
 /// Show or hide the palette (Ctrl+1, PROPERTIES), as iStCAD's `TogglePropertiesPalette`, which
@@ -493,6 +503,22 @@ fn linetype_choices(doc: &Drawing) -> Vec<(Value, String)> {
     out
 }
 
+/// The swatch of a colour row's value: an ACI colour's own (by name or number), white for
+/// ByLayer and ByBlock (as the palette shows them), none for "Multiple".
+fn swatch_of(value: &str) -> Option<Color32> {
+    let v = value.trim();
+    if v.is_empty() || v == "Multiple" {
+        return None;
+    }
+    if v.eq_ignore_ascii_case("ByLayer") || v.eq_ignore_ascii_case("ByBlock") {
+        return Some(Color32::WHITE);
+    }
+    let named = [("red", 1), ("yellow", 2), ("green", 3), ("cyan", 4), ("blue", 5), ("magenta", 6), ("white", 7)];
+    let aci = named.iter().find(|(n, _)| n.eq_ignore_ascii_case(v)).map(|(_, a)| *a).or_else(|| v.parse::<i16>().ok())?;
+    let rgb = cadcraft_engine::doc::color::aci_rgb(u8::try_from(aci).ok()?);
+    Some(Color32::from_rgb(rgb.0, rgb.1, rgb.2))
+}
+
 /// ByLayer, ByBlock, Default and the standard lineweights, as LWEIGHT and `properties.set` take them.
 fn lineweight_choices() -> Vec<(Value, String)> {
     use cadcraft_engine::doc::Lineweight;
@@ -534,8 +560,8 @@ impl Units {
 fn section_ui(app: &mut CadApp, ui: &mut egui::Ui, s: &Section, handles: &[Handle]) {
     let id = ui.scope_id().with(("ist_prop_section", s.title));
     let open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(s.open_by_default);
-    // iStCAD 1.0.233's group header: a 24-point `#262B33` bar with a `#4A525E` rule, the title
-    // semibold, and ◀ (closed) / ▼ (open) at the right.
+    // A category bar as AutoCAD's: `#262B33` with a `#4A525E` rule, the name, and a double
+    // chevron at the right (up: fold it, down: open it).
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
     let p = ui.painter();
     p.rect_filled(rect, 0.0, GROUP_FILL);
@@ -543,8 +569,12 @@ fn section_ui(app: &mut CadApp, ui: &mut egui::Ui, s: &Section, handles: &[Handl
     p.text(pos2(rect.left() + 8.0, rect.center().y), Align2::LEFT_CENTER, crate::i18n::t(s.title), FontId::proportional(12.0), Color32::from_rgb(0xf1, 0xf4, 0xf8));
     let ink = if resp.hovered() { Color32::WHITE } else { Color32::from_rgb(0xc9, 0xcf, 0xd8) };
     let c = pos2(rect.right() - 12.0, rect.center().y);
-    let chevron = if open { vec![c + vec2(-4.0, -2.5), c + vec2(4.0, -2.5), c + vec2(0.0, 2.5)] } else { vec![c + vec2(2.5, -4.0), c + vec2(2.5, 4.0), c + vec2(-2.5, 0.0)] };
-    p.add(egui::Shape::convex_polygon(chevron, ink, Stroke::NONE));
+    // AutoCAD's double chevron: pointing up to fold an open category, down to open it.
+    let dir = if open { -1.0 } else { 1.0 };
+    for dy in [-2.5, 2.5] {
+        let m = c + vec2(0.0, dy * dir);
+        p.add(egui::Shape::line(vec![m + vec2(-4.0, -2.0 * dir), m + vec2(0.0, 2.0 * dir), m + vec2(4.0, -2.0 * dir)], Stroke::new(1.4, ink)));
+    }
     crate::icons::describe_control(ui, &resp, s.title, Some(open), false);
     if resp.clicked() {
         ui.data_mut(|d| d.insert_temp(id, !open));
@@ -553,11 +583,11 @@ fn section_ui(app: &mut CadApp, ui: &mut egui::Ui, s: &Section, handles: &[Handl
         ui.add_space(2.0);
         return;
     }
-    ui.add_space(4.0);
+    ui.spacing_mut().item_spacing.y = 0.0;
     for (i, row) in s.rows.iter().enumerate() {
         row_ui(app, ui, row, &format!("{}:{i}:{}", s.title, row.label), handles);
     }
-    ui.add_space(6.0);
+    ui.add_space(3.0);
 }
 
 /// Pair each X row with its Y row in `s`, as AutoCAD's palette puts a pick button on them.
@@ -615,34 +645,72 @@ fn finish_point_pick(app: &mut CadApp) {
 /// One row (iStCAD's `AddPropertyRow`), and its editing.
 fn row_ui(app: &mut CadApp, ui: &mut egui::Ui, row: &PropRow, row_id: &str, handles: &[Handle]) {
     let t = Tokens::get();
+    // AutoCAD's property grid: the name left, the value left-aligned after a divider the user
+    // drags, a rule under each row; the row pointed at or being edited is marked.
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-    let inner = Rect::from_min_max(pos2(rect.left() + 2.0, rect.top()), pos2(rect.right() - 2.0, rect.bottom()));
-    let split = inner.left() + inner.width() / 2.15;
-    let value_rect = Rect::from_min_max(pos2(split + 4.0, inner.top() + 3.0), pos2(inner.right() - 2.0, inner.bottom() - 3.0));
+    let inner = rect;
+    let share = if app.istcad.props.split > 0.0 { app.istcad.props.split } else { 0.45 };
+    let split = (inner.left() + inner.width() * share).round();
+    let value_rect = Rect::from_min_max(pos2(split + 1.0, inner.top() + 1.0), pos2(inner.right() - 1.0, inner.bottom() - 1.0));
     let editable = row.edit != Edit::ReadOnly;
-    if editable && resp.hovered() {
-        ui.painter().rect_filled(value_rect, 3.0, t.control);
+    let editing = app.istcad.props.editing.as_ref().is_some_and(|(id, _)| id == row_id);
+    {
+        let p = ui.painter();
+        if editing || resp.hovered() {
+            p.rect_filled(Rect::from_min_max(inner.min, pos2(split, inner.bottom())), 0.0, if editing { ROW_ACTIVE } else { t.control_hover });
+        }
+        if editable && resp.hovered() && !editing {
+            p.rect_filled(value_rect, 0.0, t.control);
+        }
+        p.hline(inner.x_range(), inner.bottom() - 0.5, Stroke::new(1.0, GRID_RULE));
+        p.vline(split + 0.5, inner.y_range(), Stroke::new(1.0, GRID_RULE));
+    }
+    // The divider, dragged to give the names or the values more room.
+    let grip = Rect::from_center_size(pos2(split, inner.center().y), vec2(6.0, ROW_H));
+    let drag = ui.interact(grip, ui.scope_id().with(("ist_prop_split", row_id)), Sense::drag());
+    if drag.hovered() || drag.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if drag.dragged()
+        && let Some(px) = drag.interact_pointer_pos()
+    {
+        app.istcad.props.split = ((px.x - inner.left()) / inner.width().max(1.0)).clamp(0.2, 0.8);
     }
     let p = ui.painter().with_clip_rect(inner);
-    let label = clipped(&p, crate::i18n::t(&row.label), split - inner.left() - 12.0, LABEL_INK);
-    p.galley(pos2(inner.left() + 8.0, inner.center().y - label.size().y / 2.0), label, LABEL_INK);
-    let editing = app.istcad.props.editing.as_ref().is_some_and(|(id, _)| id == row_id);
+    let label_ink = if editing { Color32::WHITE } else { LABEL_INK };
+    let label = clipped(&p, crate::i18n::t(&row.label), split - inner.left() - 12.0, label_ink);
+    p.galley(pos2(inner.left() + 8.0, inner.center().y - label.size().y / 2.0), label, label_ink);
     if editing {
         edit_field(app, ui, value_rect, row, handles);
     } else {
         // Contents read on one line, a "·" where a line breaks.
         let shown = if matches!(row.edit, Edit::Contents(_)) { row.value.replace("\\P", " · ") } else { row.value.clone() };
-        let value = clipped(&p, &shown, value_rect.width() - 13.0, VALUE_INK);
-        p.galley(pos2(value_rect.right() - 9.0 - value.size().x, inner.center().y - value.size().y / 2.0), value, VALUE_INK);
+        let mut x = value_rect.left() + 6.0;
+        // A colour row shows its swatch before the name, as AutoCAD's does.
+        if row.label == "Color"
+            && let Some(c) = swatch_of(&row.value)
+        {
+            let r = Rect::from_center_size(pos2(x + 6.0, inner.center().y), vec2(11.0, 11.0));
+            p.rect(r, 0.0, c, Stroke::new(1.0, Color32::from_rgb(0xd5, 0xe0, 0xec)), egui::StrokeKind::Inside);
+            x += 17.0;
+        }
+        let ink = if editable { VALUE_INK } else { LABEL_INK.gamma_multiply(0.85) };
+        let value = clipped(&p, &shown, value_rect.right() - x - 18.0, ink);
+        p.galley(pos2(x, inner.center().y - value.size().y / 2.0), value, ink);
+        // A list's arrow at the right of the value pointed at, as AutoCAD shows it.
+        if resp.hovered() && matches!(row.edit, Edit::Choice(..) | Edit::Vertex(_) | Edit::Current { .. }) {
+            let c = pos2(value_rect.right() - 9.0, inner.center().y);
+            p.add(egui::Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 2.5)], VALUE_INK, Stroke::NONE));
+        }
     }
     crate::icons::describe_control(ui, &resp, &format!("{}: {}", row.label, row.value), None, false);
     let resp = resp.on_hover_text(format!("{}: {}", row.label, row.value));
     if !editable || editing {
         return;
     }
-    // The pick button, at the value's left when the row is pointed at.
+    // The pick button, at the right of the value when the row is pointed at, as AutoCAD shows it.
     if let Some(pk) = &row.pick {
-        let b = Rect::from_center_size(pos2(value_rect.left() + 11.0, value_rect.center().y), vec2(20.0, 20.0));
+        let b = Rect::from_center_size(pos2(value_rect.right() - 11.0, value_rect.center().y), vec2(18.0, 18.0));
         let id = ui.scope_id().with(("ist_pick", row_id));
         let shown = resp.hovered() || ui.rect_contains_pointer(b) || ui.memory(|m| m.has_focus(id));
         let br = ui.interact(b, id, Sense::click());
@@ -742,7 +810,7 @@ fn clipped(p: &egui::Painter, text: &str, max: f32, color: Color32) -> std::sync
 fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, handles: &[Handle]) {
     let t = Tokens::get();
     let Some((_, text)) = app.istcad.props.editing.as_mut() else { return };
-    ui.painter().rect(rect, 3.0, t.field, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    ui.painter().rect(rect, 0.0, t.field, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
     let contents = matches!(row.edit, Edit::Contents(_));
     let resp = if contents {
         // Text contents: a box of several lines under the row (Enter starts a new line;
@@ -765,8 +833,8 @@ fn edit_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, row: &PropRow, ha
         let edit = egui::TextEdit::singleline(text)
             .frame(egui::Frame::NONE)
             .text_color(VALUE_INK)
-            .align(egui::Align2::RIGHT_CENTER)
-            .margin(egui::Margin::symmetric(6, 2));
+            .align(egui::Align2::LEFT_CENTER)
+            .margin(egui::Margin::symmetric(6, 1));
         ui.put(rect, edit)
     };
     if app.istcad.props.focus_pending {
