@@ -1,0 +1,47 @@
+name: CLI binary
+
+# Builds cadcraft-cli (release, Linux x86-64) and publishes it on the `ci-bin` branch, so DWG
+# round-trip checks can run on drawings that must not be uploaded to this public repository.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cli-binary
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcb1-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev \
+            libfreetype-dev libgl1-mesa-dev libgtk-3-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cli-release
+      - name: cargo build --release -p cadcraft-cli
+        run: cargo build --locked --release -p cadcraft-cli
+      - name: Publish on ci-bin
+        run: |
+          set -e
+          mkdir -p /tmp/bin && cp target/release/cadcraft-cli /tmp/bin/
+          strip /tmp/bin/cadcraft-cli || true
+          cd /tmp/bin
+          echo "${GITHUB_SHA}" > SOURCE_COMMIT
+          git init -q -b ci-bin
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add cadcraft-cli SOURCE_COMMIT
+          git commit -q -m "cadcraft-cli for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" ci-bin
