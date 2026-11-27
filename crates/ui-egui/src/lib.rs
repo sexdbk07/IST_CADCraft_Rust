@@ -1345,6 +1345,7 @@ impl CadApp {
             istcad::quick_bar(self, ui.ctx(), central.response.rect);
         }
         self.opening.show(ui.ctx());
+        crate::istcad_plot::poll(self, ui.ctx());
         self.saving.show(ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
         updates_ui::show(self, ui.ctx());

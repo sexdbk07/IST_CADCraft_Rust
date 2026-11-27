@@ -497,13 +497,52 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Option<
     action
 }
 
-/// Plot with `params`; the result (or the error) goes to the command line, and the PDF opens
-/// where the host can open it and `open_after` asks for it.
+/// Plot with `params`: the PDF renders on a worker thread while a progress card shows the sheets
+/// done and the time taken ([`Plotting`]); the result (or the error) then goes to the command
+/// line, and the PDF opens where the host can open it and `open_after` asks for it. The web
+/// build has no threads and plots in place.
 fn plot_to(app: &mut CadApp, params: Value, open_after: bool) {
-    match app.run("plot", params) {
+    if app.istcad.plotting.is_some() {
+        app.set_status(crate::tl!("A plot is still being made; wait for it to finish."));
+        return;
+    }
+    let job = match cadcraft_engine::cmd::plot_job(&app.session, &params) {
+        Ok(job) => job,
+        Err(e) => return app.set_status(e.to_string()),
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let pages = job.pages;
+    // The web build renders in place; the result is taken up on the next frame all the same.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let r = job.render();
+        let _ = tx.send((job, r));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let counter = done.clone();
+        let spawned = std::thread::Builder::new().name("ist-plot".into()).spawn(move || {
+            cadcraft_io::pdf::report_pages_to(Some(counter));
+            let r = job.render();
+            let _ = tx.send((job, r));
+        });
+        if let Err(e) = spawned {
+            return app.set_status(format!("PLOT: could not start the plot: {e}"));
+        }
+    }
+    app.istcad.plotting = Some(Plotting { pages, done, open_after, started: None, rx });
+}
+
+/// Write a rendered plot and report it.
+fn finish_plot(app: &mut CadApp, job: &cadcraft_engine::cmd::PlotJob, rendered: Result<Vec<u8>, String>, open_after: bool) {
+    let r = rendered.map_err(|e| format!("PLOT: {e}")).and_then(|bytes| job.finish(&mut app.session, bytes).map_err(|e| e.to_string()));
+    match r {
         Ok(r) => match r.get("path").and_then(Value::as_str) {
             Some(path) => {
-                app.session.echo(format!("Plotted to {path} ({} page(s)).", r["pages"].as_u64().unwrap_or(1)));
+                let size = r["bytes"].as_u64().unwrap_or(0) as f64 / 1024.0;
+                let size = if size >= 1024.0 { format!("{:.1} MB", size / 1024.0) } else { format!("{size:.0} KB") };
+                app.session.echo(format!("Plotted to {path} ({} page(s), {size}).", r["pages"].as_u64().unwrap_or(1)));
                 if open_after && let Some(open) = app.services.open_document.as_ref() {
                     open(path);
                 }
@@ -512,6 +551,74 @@ fn plot_to(app: &mut CadApp, params: Value, open_after: bool) {
         },
         Err(e) => app.set_status(e),
     }
+}
+
+/// A plot rendering on a worker thread.
+pub struct Plotting {
+    /// The sheets (pages) it makes, and how many are done.
+    pages: usize,
+    done: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    open_after: bool,
+    /// When the card was first shown (egui time, seconds).
+    started: Option<f64>,
+    rx: std::sync::mpsc::Receiver<(cadcraft_engine::cmd::PlotJob, Result<Vec<u8>, String>)>,
+}
+
+impl Plotting {
+    /// Sheets done of all, for the progress bar.
+    fn fraction(&self) -> f32 {
+        let done = self.done.load(std::sync::atomic::Ordering::Relaxed).min(self.pages);
+        done as f32 / self.pages.max(1) as f32
+    }
+}
+
+/// Each frame: finish a plot whose PDF is ready, else show its progress card (a bar of the
+/// sheets done, the time taken).
+pub fn poll(app: &mut CadApp, ctx: &egui::Context) {
+    let Some(job) = app.istcad.plotting.as_mut() else { return };
+    match job.rx.try_recv() {
+        Ok((plot, rendered)) => {
+            let open_after = job.open_after;
+            app.istcad.plotting = None;
+            finish_plot(app, &plot, rendered, open_after);
+        }
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            app.istcad.plotting = None;
+            app.set_status(crate::tl!("PLOT: the plot stopped before it finished."));
+        }
+        Err(std::sync::mpsc::TryRecvError::Empty) => {
+            let now = ctx.input(|i| i.time);
+            let started = *job.started.get_or_insert(now);
+            let (pages, fraction) = (job.pages, job.fraction());
+            let done = job.done.load(std::sync::atomic::Ordering::Relaxed).min(pages);
+            progress_card(ctx, pages, done, fraction, now - started);
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+}
+
+/// The progress card in the middle of the window, in the dialog's light style.
+fn progress_card(ctx: &egui::Context, pages: usize, done: usize, fraction: f32, secs: f64) {
+    egui::Area::new(egui::Id::unique("ist_plot_progress")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).interactable(false).show(
+        ctx,
+        |ui| {
+            Frame::NONE.fill(Color32::WHITE).stroke(Stroke::new(1.0, CARD_EDGE)).corner_radius(CornerRadius::same(8)).inner_margin(Margin::symmetric(18, 14)).show(ui, |ui| {
+                ui.set_width(320.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new().color(ACCENT));
+                    ui.label(RichText::new(crate::tl!("Plotting PDF…")).color(INK).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new(format!("{secs:.0} s")).color(MUTED));
+                    });
+                });
+                ui.add_space(6.0);
+                let text = if pages > 1 { format!("{} {} / {pages}", crate::tl!("Sheet"), (done + 1).min(pages)) } else { crate::tl!("Writing vector PDF").to_string() };
+                let bar = egui::ProgressBar::new(if pages > 1 { fraction } else { 0.0 }).desired_width(320.0).fill(ACCENT).text(RichText::new(text).color(INK));
+                // One sheet: no steps to count, so the bar moves to show the plot is going.
+                ui.add(if pages > 1 { bar } else { bar.animate(true) });
+            });
+        },
+    );
 }
 
 /// Paper, Plot layout and Plot style.

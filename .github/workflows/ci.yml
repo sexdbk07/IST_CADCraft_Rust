@@ -43,7 +43,9 @@ jobs:
       - name: UI unit tests (iStCAD shell + theme)
         run: cargo test --locked -p cadcraft-ui-egui --lib -- istcad theme lasso
       - name: IO unit tests (DXF/DWG text and attributes)
-        run: cargo test --locked -p cadcraft-io --lib -- attribute kept_dimension referenced_layer family_only
+        run: cargo test --locked -p cadcraft-io --lib -- attribute kept_dimension referenced_layer family_only pdf triangles
+      - name: PDF text tests
+        run: cargo test --locked -p cadcraft-io --test pdf_text
       - name: Render unit tests (display-list chunk cache)
         run: cargo test --locked -p cadcraft-render --lib -- chunk_cache
 

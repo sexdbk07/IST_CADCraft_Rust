@@ -823,6 +823,69 @@ fn plot_sheets(cmd: &str, d: &cadcraft_doc::Drawing, v: &Value) -> Result<Vec<St
 /// `layers?: bool` (drawing layers as PDF layers, default on), `offLayers?: bool` (layers that
 /// are off on hidden PDF layers), `links?: [{handle, url}]` (hyperlinks) and `title?`.
 fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let job = prepare_plot(s, p, cmd)?;
+    let bytes = job.render().map_err(|e| bad(cmd, e))?;
+    job.finish(s, bytes)
+}
+
+/// A PLOT prepared on the session, to be rendered anywhere (a worker thread: the drawing is
+/// shared, not borrowed) and then finished on the session, which writes the file.
+pub struct PlotJob {
+    doc: std::sync::Arc<Drawing>,
+    space: Space,
+    opts: Value,
+    hook: super::file::PlotHook,
+    cmd: String,
+    path: Option<String>,
+    layout: String,
+    /// The sheets (PDF pages) the plot makes.
+    pub pages: usize,
+    format: String,
+}
+
+impl PlotJob {
+    /// Render the plot (PDF, PNG or SVG bytes); needs no session.
+    pub fn render(&self) -> std::result::Result<Vec<u8>, String> {
+        (self.hook)(&self.doc, &self.space, &self.opts)
+    }
+
+    /// Write the rendered bytes where the plot goes and give PLOT's answer.
+    pub fn finish(&self, s: &mut Session, bytes: Vec<u8>) -> Result<Value> {
+        let (cmd, layout, pages, format) = (self.cmd.as_str(), &self.layout, self.pages, &self.format);
+        match self.path.as_deref() {
+            Some(_path) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let path = _path;
+                    // Exclusively create a fresh temporary file and rename it into place so a planted
+                    // `<path>.cadcraft-tmp` symlink cannot redirect the plot write (CWE-59).
+                    crate::file_access::check_write(path).map_err(|e| bad(cmd, e))?;
+                    let folder = super::file::new_folder(path);
+                    crate::atomic_write::write_atomic_making_folders(std::path::Path::new(path), &bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
+                    let mut r = json!({ "path": path, "bytes": bytes.len(), "layout": layout, "pages": pages, "format": format });
+                    super::file::report_new_folder(s, &mut r, folder);
+                    Ok(r)
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = &s;
+                    super::exchange::deliver_file(cmd, _path, &bytes, super::file::deliver())?;
+                    Ok(json!({ "path": _path, "bytes": bytes.len(), "layout": layout, "pages": pages, "format": format }))
+                }
+            }
+            None => Ok(json!({ "data": base64_encode(&bytes), "bytes": bytes.len(), "layout": layout, "pages": pages, "format": format })),
+        }
+    }
+}
+
+/// Prepare PLOT with `p` (as the `plot` command takes it, page setup and device applied) for
+/// rendering off the session: see [`PlotJob`].
+pub fn plot_job(s: &Session, p: &Value) -> Result<PlotJob> {
+    let p = super::plotters::plot_options(s, p, "plot")?;
+    prepare_plot(s, &p, "plot")
+}
+
+fn prepare_plot(s: &Session, p: &Value, cmd: &str) -> Result<PlotJob> {
     let hook = io().and_then(|h| h.plot).ok_or_else(|| bad(cmd, "plotting is not available in this build"))?;
     // Checked here for a clear error; the plotter resolves the names the same way.
     let sheets = p.get("layouts").map(|v| plot_sheets(cmd, s.doc()?, v)).transpose()?;
@@ -891,35 +954,13 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     if is_image && sheets.as_ref().is_some_and(|names| names.len() > 1) {
         return Err(bad(cmd, "`layouts` with several sheets needs PDF output; PNG and SVG hold one sheet, so plot each layout separately"));
     }
-    let bytes = hook(s.doc()?, &space, &opts).map_err(|e| bad(cmd, e))?;
     let layout = match &sheets {
         Some(names) => names.first().cloned().unwrap_or_default(),
         None => space.tab_name().to_string(),
     };
     let pages = sheets.as_ref().map_or(1, Vec::len);
     let format = opts.get("output").and_then(Value::as_str).map(str::to_ascii_lowercase).unwrap_or_else(|| "pdf".into());
-    match str_param(p, "path") {
-        Some(_path) => {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                let path = _path;
-                // Exclusively create a fresh temporary file and rename it into place so a planted
-                // `<path>.cadcraft-tmp` symlink cannot redirect the plot write (CWE-59).
-                crate::file_access::check_write(path).map_err(|e| bad(cmd, e))?;
-                let folder = super::file::new_folder(path);
-                crate::atomic_write::write_atomic_making_folders(std::path::Path::new(path), &bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
-                let mut r = json!({ "path": path, "bytes": bytes.len(), "layout": layout, "pages": pages, "format": format });
-                super::file::report_new_folder(s, &mut r, folder);
-                Ok(r)
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                super::exchange::deliver_file(cmd, _path, &bytes, super::file::deliver())?;
-                Ok(json!({ "path": _path, "bytes": bytes.len(), "layout": layout, "pages": pages, "format": format }))
-            }
-        }
-        None => Ok(json!({ "data": base64_encode(&bytes), "bytes": bytes.len(), "layout": layout, "pages": pages, "format": format })),
-    }
+    Ok(PlotJob { doc: s.state()?.doc.clone(), space, opts, hook, cmd: cmd.to_string(), path: str_param(p, "path").map(str::to_string), layout, pages, format })
 }
 
 /// The model-space rectangle a plot of `plotArea` covers: `extents` (default) plots everything,

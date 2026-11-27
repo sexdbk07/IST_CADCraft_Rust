@@ -143,6 +143,11 @@ pub struct Shell {
     caption: String,
     /// The Properties palette (Ctrl+1).
     pub props: crate::istcad_props::State,
+    /// Where the Dynamic Input box opened for the text being typed: it stays there while typing,
+    /// and the command suggestions open under it.
+    pub dyn_box: Option<egui::Rect>,
+    /// A PDF plot being made on a worker thread, with its progress card.
+    pub plotting: Option<crate::istcad_plot::Plotting>,
 }
 
 impl Shell {
@@ -1347,7 +1352,12 @@ fn autocomplete(app: &mut CadApp, ctx: &egui::Context, bottom_left: egui::Pos2) 
     const ROW: f32 = 20.0;
     let h = (sug.len() as f32 * ROW + 6.0).min(190.0);
     let mut run = None;
-    egui::Area::new(egui::Id::unique("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(bottom_left - vec2(0.0, h + 2.0)).show(ctx, |ui| {
+    // Typed into the drawing: under the Dynamic Input box, as iStCAD opens them; else above the bar.
+    let at = match app.istcad.dyn_box {
+        Some(r) => pos2(r.right() - 143.0, r.bottom() + 2.0),
+        None => bottom_left - vec2(0.0, h + 2.0),
+    };
+    egui::Area::new(egui::Id::unique("ist_cmd_suggest")).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
         egui::Frame::NONE.fill(ink::SUGGEST_BG).stroke(Stroke::new(1.0, ink::SUGGEST_EDGE)).corner_radius(3).inner_margin(egui::Margin::same(2)).show(ui, |ui| {
             let width = sug.iter().map(|s| ui.fonts_mut(|f| f.layout_no_wrap(s.display.clone(), FontId::proportional(10.0), Color32::WHITE).size().x)).fold(120.0_f32, f32::max);
             ui.set_width((width + 24.0).min(254.0));

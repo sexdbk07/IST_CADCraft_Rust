@@ -341,6 +341,17 @@ impl Map {
     }
 }
 
+thread_local! {
+    /// Where this thread counts the pages it has written, for a progress bar.
+    static PAGES_DONE: std::cell::RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Count each page this thread writes from now on in `counter` (`None`: stop counting), so a
+/// plot made on a worker thread can show how far it has got.
+pub fn report_pages_to(counter: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>) {
+    PAGES_DONE.with(|c| *c.borrow_mut() = counter);
+}
+
 /// Write a one-page vector PDF of a space.
 pub fn pdf(d: &Drawing, space: &Space, o: &PdfOptions) -> Result<Vec<u8>> {
     pdf_sheets(d, std::slice::from_ref(space), o)
@@ -467,6 +478,11 @@ fn write_pdf(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions, text_as
             // Groups are added to the document, so they must exist before the page starts.
             groups.add(doc, d, &page.layers);
             write_page(doc, &page, &groups, &mut fonts)?;
+            PAGES_DONE.with(|c| {
+                if let Some(c) = c.borrow().as_ref() {
+                    c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            });
         }
         if items.len() == 1 && !groups.ids.is_empty() {
             writer.document_mut().set_optional_content_page_mode(true);
@@ -593,6 +609,8 @@ fn sheet(d: &Drawing, space: &Space, o: &PdfOptions, links_to: &[(Handle, String
     cadcraft_render::pen::apply(&mut list, map.s * unit_mm);
     let media = sheet.size * k;
     let clip_pt = if placed { Bounds2::new(sheet.printable.min * k, sheet.printable.max * k) } else { Bounds2::new(Vec2::ZERO, media) };
+    // On the grid paths are written on, so what is clipped to it ends on its edge.
+    let clip_pt = Bounds2::new(snap(clip_pt.min), snap(clip_pt.max));
     // The layers drawn on, in order of first use.
     let mut layers: Vec<u32> = Vec::new();
     if o.layers {
@@ -720,6 +738,21 @@ const MAX_COORD: f64 = 1.0e7;
 fn coord(p: Vec2) -> Option<(f32, f32)> {
     let ok = |v: f64| v.is_finite() && v.abs() <= MAX_COORD;
     (ok(p.x) && ok(p.y)).then_some((p.x as f32, p.y as f32))
+}
+
+/// Path coordinates are written on a grid of 1/100 point (0.0035 mm, far below what prints or
+/// shows): shorter numbers and repeated digits make the file much smaller once compressed.
+const GRID: f64 = 100.0;
+
+/// A point (points) moved onto the [`GRID`].
+fn snap(p: Vec2) -> Vec2 {
+    let r = |v: f64| if v.is_finite() { (v * GRID).round() / GRID } else { v };
+    Vec2::new(r(p.x), r(p.y))
+}
+
+/// A point on the [`GRID`] as the writer's `f32`, or `None` when out of range.
+fn grid_coord(p: Vec2) -> Option<(f32, f32)> {
+    coord(snap(p))
 }
 
 /// A rectangle path between two corners (points), if it has an area.
@@ -851,11 +884,13 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts:
     let texts = fonts::texts(list);
     let white = Rgb(255, 255, 255);
     let mut batch: Option<(StrokeStyle, PathBuilder)> = None;
+    let mut fills: Option<(FillStyle, PathBuilder)> = None;
     let mut layer: Option<OcgId> = None;
     for (i, prim) in list.prims.iter().enumerate() {
         let want = list.prim_layers.get(i).and_then(|l| groups.ids.get(l)).copied();
         if want != layer {
             flush(s, &mut batch);
+            flush_fills(s, &mut fills);
             layer_changed(s, layer, want)?;
             layer = want;
         }
@@ -869,6 +904,9 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts:
         let w = f64::from(prim.lw) * PT_PER_MM;
         let w = if w.is_finite() && w > 0.0 { w.min(100.0) } else { 0.0 };
         let m = Mark { rgb, t, w };
+        if !matches!(prim.kind, Kind::Tris | Kind::Mask) {
+            flush_fills(s, &mut fills);
+        }
         match prim.kind {
             Kind::Polyline | Kind::Infinite { .. } => polyline(s, &mut batch, p, prim, raw, m),
             Kind::Tris | Kind::Mask => {
@@ -878,8 +916,11 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts:
                 let text_font =
                     u32::try_from(i).ok().and_then(|i| texts.get(&i).copied()).and_then(|text| fonts.font(&text.glyph.face).map(|font| (text, font)));
                 match text_font {
-                    Some((text, font)) => glyph(s, font, text, &p.map, m.rgb, m.t),
-                    None => fill_tris(s, p, raw, m.rgb, m.t),
+                    Some((text, font)) => {
+                        flush_fills(s, &mut fills);
+                        glyph(s, font, text, &p.map, m.rgb, m.t);
+                    }
+                    None => fill_tris(s, &mut fills, p, raw, m.rgb, m.t),
                 }
             }
             Kind::Point => point(s, &mut batch, &p.map, raw, m),
@@ -888,6 +929,7 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts:
         }
     }
     flush(s, &mut batch);
+    flush_fills(s, &mut fills);
     layer_changed(s, layer, None)
 }
 
@@ -934,7 +976,9 @@ fn polyline_points(prim: &DPrim, raw: &[Vec2], map: &Map, clip_pt: &Bounds2) -> 
 
 /// Add one run of a polyline to the batch, or paint it as a dot when it has no extent.
 fn stroke_run(s: &mut Surface<'_>, batch: &mut Option<(StrokeStyle, PathBuilder)>, run: &[Vec2], style: StrokeStyle, m: Mark) {
-    let Some(pts) = run.iter().map(|q| coord(*q)).collect::<Option<Vec<_>>>() else { return };
+    let Some(mut pts) = run.iter().map(|q| grid_coord(*q)).collect::<Option<Vec<_>>>() else { return };
+    // Vertices that fall on the same grid point add nothing.
+    pts.dedup();
     // The writer leaves out a path without extent, so a zero-length line is
     // painted as the round-cap dot its stroke would make.
     if let Some(&(x, y)) = pts.first()
@@ -957,25 +1001,146 @@ fn stroke_run(s: &mut Surface<'_>, batch: &mut Option<(StrokeStyle, PathBuilder)
     }
 }
 
-/// Fill a set of triangles, clipped to the plot area.
-fn fill_tris(s: &mut Surface<'_>, p: &SheetPage, raw: &[Vec2], rgb: Rgb, t: u8) {
+/// What consecutive fills share to be painted as one path: colour and transparency (percent).
+#[derive(Clone, Copy, PartialEq)]
+struct FillStyle {
+    rgb: Rgb,
+    transparency: u8,
+}
+
+/// Paint the fills collected so far as one path (non-zero winding: their union).
+fn flush_fills(s: &mut Surface<'_>, fills: &mut Option<(FillStyle, PathBuilder)>) {
+    let Some((style, pb)) = fills.take() else { return };
+    if let Some(path) = pb.finish() {
+        fill_path(s, &path, style.rgb, style.transparency);
+    }
+}
+
+/// Fill a set of triangles, clipped to the plot area: written as the outline of their union
+/// (see [`outline`]) rather than triangle by triangle, added to the open fill batch when it has
+/// the same colour. A transparent fill is painted on its own, so overlapping ones build up as
+/// on screen.
+fn fill_tris(s: &mut Surface<'_>, fills: &mut Option<(FillStyle, PathBuilder)>, p: &SheetPage, raw: &[Vec2], rgb: Rgb, t: u8) {
     let mapped: Vec<Vec2> = raw.iter().map(|q| p.map.pt(*q)).collect();
     // With a vertex out of range, keep the parts inside the plot area.
     let tris = if mapped.iter().all(|q| coord(*q).is_some()) { mapped } else { clip::clip_triangles(&mapped, &p.clip_pt) };
-    let mut pb = PathBuilder::new();
-    for tri in tris.as_chunks::<3>().0 {
-        let Some(v) = tri.iter().map(|q| coord(*q)).collect::<Option<Vec<_>>>() else { continue };
-        for (j, (x, y)) in v.iter().enumerate() {
+    let loops = outline(&tris);
+    if loops.is_empty() {
+        return;
+    }
+    let style = FillStyle { rgb, transparency: t };
+    if t > 0 || fills.as_ref().is_some_and(|(f, _)| *f != style) {
+        flush_fills(s, fills);
+    }
+    let (_, pb) = fills.get_or_insert_with(|| (style, PathBuilder::new()));
+    for lp in &loops {
+        for (j, (x, y)) in lp.iter().enumerate() {
+            let (x, y) = (*x as f32 / GRID as f32, *y as f32 / GRID as f32);
             if j == 0 {
-                pb.move_to(*x, *y);
+                pb.move_to(x, y);
             } else {
-                pb.line_to(*x, *y);
+                pb.line_to(x, y);
             }
         }
         pb.close();
     }
-    if let Some(path) = pb.finish() {
-        fill_path(s, &path, rgb, t);
+    if t > 0 {
+        flush_fills(s, fills);
+    }
+}
+
+/// The outline of a set of triangles (page points, three per triangle) as closed loops of
+/// [`GRID`] points that fill, with the non-zero rule, exactly the area the triangles cover.
+///
+/// Each triangle is turned counter-clockwise and its edges are added up; an edge two triangles
+/// share runs both ways and cancels. What is left winds once around the covered area
+/// (holes the other way), and every vertex has as many edges in as out, so the edges form
+/// closed loops. Points in a straight run are dropped.
+fn outline(tris: &[Vec2]) -> Vec<Vec<(i64, i64)>> {
+    use std::collections::BTreeMap;
+    type P = (i64, i64);
+    let key = |q: Vec2| -> Option<P> {
+        let ok = |v: f64| v.is_finite() && v.abs() <= MAX_COORD;
+        (ok(q.x) && ok(q.y)).then(|| ((q.x * GRID).round() as i64, (q.y * GRID).round() as i64))
+    };
+    let cross = |o: P, a: P, b: P| i128::from(a.0 - o.0) * i128::from(b.1 - o.1) - i128::from(a.1 - o.1) * i128::from(b.0 - o.0);
+    // Net count of each edge, keyed low point first: positive runs low → high.
+    let mut net: BTreeMap<(P, P), i64> = BTreeMap::new();
+    for tri in tris.as_chunks::<3>().0 {
+        let (Some(a), Some(b), Some(c)) = (key(tri[0]), key(tri[1]), key(tri[2])) else { continue };
+        let area = cross(a, b, c);
+        if area == 0 {
+            continue;
+        }
+        let v = if area > 0 { [a, b, c] } else { [a, c, b] };
+        for k in 0..3 {
+            let (from, to) = (v[k], v[(k + 1) % 3]);
+            if from < to {
+                *net.entry((from, to)).or_default() += 1;
+            } else {
+                *net.entry((to, from)).or_default() -= 1;
+            }
+        }
+    }
+    let mut out: BTreeMap<P, Vec<P>> = BTreeMap::new();
+    for ((lo, hi), n) in net {
+        let (from, to) = if n > 0 { (lo, hi) } else { (hi, lo) };
+        for _ in 0..n.unsigned_abs() {
+            out.entry(from).or_default().push(to);
+        }
+    }
+    let starts: Vec<P> = out.keys().copied().collect();
+    let mut loops = Vec::new();
+    for start in starts {
+        while let Some(mut at) = out.get_mut(&start).and_then(Vec::pop) {
+            let mut lp = vec![start];
+            // Balanced in and out, so the walk can only end back at the start.
+            while at != start {
+                lp.push(at);
+                match out.get_mut(&at).and_then(Vec::pop) {
+                    Some(next) => at = next,
+                    None => break,
+                }
+            }
+            let lp = straighten(lp);
+            if lp.len() >= 3 {
+                loops.push(lp);
+            }
+        }
+    }
+    loops
+}
+
+/// A closed loop without the points that lie on the straight line between their neighbours
+/// (within half a grid step).
+fn straighten(mut lp: Vec<(i64, i64)>) -> Vec<(i64, i64)> {
+    let on_line = |a: (i64, i64), b: (i64, i64), c: (i64, i64)| {
+        let (abx, aby) = ((c.0 - a.0) as f64, (c.1 - a.1) as f64);
+        let len = abx.hypot(aby);
+        let cr = (b.0 - a.0) as f64 * aby - (b.1 - a.1) as f64 * abx;
+        let along = (b.0 - a.0) as f64 * abx + (b.1 - a.1) as f64 * aby;
+        // b sits between a and c (not a spike back) and within half a step of the line.
+        len > 0.0 && cr.abs() <= 0.5 * len && along > 0.0 && along < len * len
+    };
+    // Passes until nothing more drops (one or two in practice), each linear in the points.
+    loop {
+        let n = lp.len();
+        if n <= 3 {
+            return lp;
+        }
+        let mut keep: Vec<(i64, i64)> = Vec::with_capacity(n);
+        for i in 0..n {
+            let a = keep.last().copied().unwrap_or(lp[(i + n - 1) % n]);
+            let (b, c) = (lp[i], lp[(i + 1) % n]);
+            if b == a || on_line(a, b, c) {
+                continue;
+            }
+            keep.push(b);
+        }
+        if keep.len() == n || keep.len() < 3 {
+            return keep;
+        }
+        lp = keep;
     }
 }
 
@@ -1110,5 +1275,44 @@ mod saved_setup_tests {
         let m = map(&d, json!({"scale": 0.25}));
         assert!((m.s - 0.25).abs() < 1e-12, "{}", m.s);
         assert!(m.from.dist(Vec2::new(428.0, 297.0)) < 1e-9 && m.to.dist(Vec2::new(148.5, 105.0)) < 1e-9, "still placed: {:?} {:?}", m.from, m.to);
+    }
+
+    /// The area a set of loops fills with the non-zero rule, by the shoelace sum (holes wound
+    /// the other way subtract).
+    fn filled_area(loops: &[Vec<(i64, i64)>]) -> f64 {
+        loops
+            .iter()
+            .map(|lp| {
+                let n = lp.len();
+                (0..n).map(|i| (lp[i].0 * lp[(i + 1) % n].1 - lp[(i + 1) % n].0 * lp[i].1) as f64).sum::<f64>() / 2.0
+            })
+            .sum::<f64>()
+            / (GRID * GRID)
+    }
+
+    /// A triangulated square with a square hole becomes two loops of four corners (the shared
+    /// edges cancel, the points along the sides drop), filling the same area as the triangles.
+    #[test]
+    fn triangles_fill_as_the_outline_of_their_union() {
+        let v = |x: f64, y: f64| Vec2::new(x, y);
+        // A 30 × 30 square with a 10 × 10 hole, as a fan of triangles around the hole, wound
+        // either way, and with points along the outer sides.
+        let (o, h) = ([v(0.0, 0.0), v(15.0, 0.0), v(30.0, 0.0), v(30.0, 30.0), v(0.0, 30.0)], [v(10.0, 10.0), v(20.0, 10.0), v(20.0, 20.0), v(10.0, 20.0)]);
+        let tris = vec![
+            o[0], o[1], h[0], o[1], h[1], h[0], o[1], o[2], h[1], // bottom
+            o[2], o[3], h[2], h[1], o[2], h[2], // right, one wound clockwise below
+            o[3], o[4], h[3], o[3], h[3], h[2], // top
+            o[4], o[0], h[0], o[4], h[0], h[3], // left
+        ];
+        let mut tris = tris;
+        tris.swap(9, 10);
+        let loops = outline(&tris);
+        assert_eq!(loops.len(), 2, "outer edge and hole: {loops:?}");
+        assert!(loops.iter().all(|l| l.len() == 4), "corners only: {loops:?}");
+        assert!((filled_area(&loops) - (900.0 - 100.0)).abs() < 1e-9, "{}", filled_area(&loops));
+        // Overlapping triangles still fill their union.
+        let lapped = vec![v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)];
+        let one = outline(&lapped[..3]);
+        assert!(filled_area(&outline(&lapped)) >= filled_area(&one) - 1e-9 && filled_area(&one) > 0.0);
     }
 }

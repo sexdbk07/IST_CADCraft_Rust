@@ -20,11 +20,15 @@ iStCAD is the reference: sizes, colours and order below are iStCAD's.
 
 ## Drawing area behaviour
 
-- **Dynamic input (DYN)**: iStCAD's panel, 242 wide, 18 points below-right of the pointer and
-  kept 8 points inside the drawing area (`#363C45` at 95 %, `#AEB4BE` border): the prompt (10 pt,
-  with options and default) over "↳" and the value field (`#4A515B`). It holds what is typed, or the
-  live value under the pointer, dimmed; "Command:" while a command name is typed with nothing
-  running. (`canvas/dyn_boxes.rs`, `istcad_dynamic_input`.)
+- **Dynamic input (DYN)**, as iStCAD 1.0.231 (`CadViewportControl.xaml`, `PositionDynamicInput`):
+  two separate pieces. The prompt hint follows the pointer 18 × 21 px below-right of it (10 pt
+  `#D5E1E6` on `#1E2B31` at 73 %, corner 3, padding 5 × 2, at most 245 wide with an ellipsis),
+  showing the running command's prompt with its options and default, or "Select objects:"; it
+  takes no clicks. The editable box (a "↳" and a 143 × 23 field, `#4A515B` with a `#858B94`
+  border, white 11 pt) opens only when something is typed, 18 × 38 px from the pointer, and stays
+  where it opened while typing; a command name typed with nothing running opens it too, with the
+  command suggestions under it. No live distance or angle fields. (`canvas/dyn_boxes.rs`,
+  `istcad_dynamic_input`.)
 - **Object snap marker**: iStCAD's shapes in `#55E6A5` with the short mode name (END, MID, CEN,
   QUAD, INT, INS…) on a dark tag 8 points right and 5 below. (`canvas/cursor.rs`.)
 - **Selection, as in AutoCAD**: a click on empty space starts the rectangular window (second
@@ -92,4 +96,4 @@ compressor in the DWG worker.
 
 ## Plot (iStCAD 1.0.231–1.0.233 `ShowPlotDialog`)
 
-The iStCAD window opens iStCAD's Plot (PDF) dialog for PLOT, PRINT and Ctrl+P (`istcad_plot.rs`): Paper (ISO A0–A5, ANSI A–D, Custom; margin; Auto / Portrait / Landscape), Plot layout (Model: Extents, Display, Window picked in the drawing; a layout: its sheet; Fit to paper or 1:1 … 5:1 or Custom mm = units; Center the plot or an X/Y offset; the fitted scale), Plot style (Color, Grayscale, Black, Custom pens: the inline pen table, an output colour and lineweight per index colour kept in the drawing's "iStCAD pens.ctb"; object lineweights; open the PDF after plotting), a live preview a quarter second after each change, and All layouts → PDF, Apply to layout, Plot PDF, Close. Not there yet: scaled and default lineweights, and the layout viewport card.
+The iStCAD window opens iStCAD's Plot (PDF) dialog for PLOT, PRINT and Ctrl+P (`istcad_plot.rs`): Paper (ISO A0–A5, ANSI A–D, Custom; margin; Auto / Portrait / Landscape), Plot layout (Model: Extents, Display, Window picked in the drawing; a layout: its sheet; Fit to paper or 1:1 … 5:1 or Custom mm = units; Center the plot or an X/Y offset; the fitted scale), Plot style (Color, Grayscale, Black, Custom pens: the inline pen table, an output colour and lineweight per index colour kept in the drawing's "iStCAD pens.ctb"; object lineweights; open the PDF after plotting), a live preview a quarter second after each change, and All layouts → PDF, Apply to layout, Plot PDF, Close. The PDF is made on a worker thread behind a progress card (sheets done of all, seconds taken) and reported with its size; it is vector, fills written as the outline of their area and paths on a 1/100 pt grid, so files stay small. Not there yet: scaled and default lineweights, and the layout viewport card.

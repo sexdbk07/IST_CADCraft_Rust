@@ -275,18 +275,15 @@ fn dynamic_input_boxes(
     r
 }
 
-/// Dynamic Input in the iStCAD window, kept apart as AutoCAD keeps it: the **command tooltip**
-/// below and right of the pointer says what the command asks (the prompt, its [options] and
-/// <default>, ↓ for the options menu), in a quiet tooltip; the **input fields** take the values,
-/// as entry boxes above the pointer: at a point prompt with a last point, the distance box along
-/// the rubber band and the angle box by the pointer; without one, X and Y; at an angle prompt one
-/// angle box; at other prompts one box. A box shows what is typed (white, with the caret) or the
-/// live value under the pointer (dimmed); the active box has the accent border, a locked value its
-/// lock. With no command, typing shows "Command:" and the name in a box. Each frame lays out a
-/// few short strings only, with no wrapping.
+/// iStCAD's Dynamic Input (1.0.231): two separate pieces. The prompt follows the pointer (18, 21)
+/// px below and right of it as a light, non-interactive hint; the editable box, a `↳` and one
+/// field, appears only once something is typed (18, 38) px from the pointer and stays where it
+/// opened while typing. No live distance or angle fields.
 fn istcad_dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2, fields: bool) {
-    let prompt = app.session.current_prompt();
     let typed = app.cmd.buffer.clone();
+    if typed.is_empty() {
+        app.istcad.dyn_box = None;
+    }
     let at = match app.cmd.options {
         Some(_) => *app.cmd.options_anchor.get_or_insert(hover),
         None => {
@@ -294,163 +291,83 @@ fn istcad_dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2, fields
             hover
         }
     };
-    let Some(pr) = prompt else {
-        // No command: the name being typed, in an input box.
-        if !typed.is_empty() {
-            let label = crate::tl!("Command:");
-            input_box(p, at + vec2(20.0, -34.0), Some(label), &typed, true, true, false);
+    let hint = match app.session.current_prompt() {
+        Some(pr) if app.session.settings.dynprompt => {
+            let mut m = if pr.raw { pr.display() } else { crate::i18n::t(&pr.message).to_string() };
+            if !pr.raw && !pr.keywords.is_empty() {
+                m.push_str(" [");
+                m.push_str(&pr.keywords.join("/"));
+                m.push(']');
+            }
+            if let Some(d) = pr.default.as_ref().filter(|_| !pr.raw) {
+                m.push_str(" <");
+                m.push_str(d);
+                m.push('>');
+            }
+            if !m.trim_end().ends_with(':') {
+                m.push(':');
+            }
+            Some(prompt_hint(p, at, &m))
         }
-        return;
+        _ => None,
     };
-    // 1. The command tooltip.
-    let guide = if app.session.settings.dynprompt {
-        let mut m = if pr.raw { pr.display() } else { crate::i18n::t(&pr.message).to_string() };
-        if !pr.raw && !pr.keywords.is_empty() {
-            m.push_str(" [");
-            m.push_str(&pr.keywords.join("/"));
-            m.push(']');
-        }
-        if let Some(d) = pr.default.as_ref().filter(|_| !pr.raw) {
-            m.push_str(" <");
-            m.push_str(d);
-            m.push('>');
-        }
-        Some(command_tip(p, at, &m, !pr.keywords.is_empty()))
-    } else {
-        None
-    };
-    // 2. The input fields (a grip's own fields take their place).
-    if !fields {
-        input_fields(app, p, at, &pr, &typed);
+    if !typed.is_empty() && !fields {
+        let area = p.clip_rect();
+        let r = *app.istcad.dyn_box.get_or_insert_with(|| {
+            let size = vec2(ENTRY_W, ENTRY_H);
+            let left = (at.x + 18.0).clamp(area.left() + 6.0, (area.right() - size.x - 6.0).max(area.left() + 6.0));
+            let top = (at.y + 38.0).clamp(area.top() + 6.0, (area.bottom() - size.y - 6.0).max(area.top() + 6.0));
+            Rect::from_min_size(pos2(left, top).round(), size)
+        });
+        entry(p, r, &typed);
     }
-    if let Some(r) = guide {
+    if let Some(r) = hint {
         options_menu(app, p, r, hover);
     }
 }
 
-/// The command tooltip: one line, 10 points, `#2B3038` at 90 % with a thin `#5E6672` border and
-/// no field, below and right of the pointer and kept inside the drawing.
-fn command_tip(p: &egui::Painter, at: Pos2, text: &str, options: bool) -> Rect {
-    const FILL: Color32 = Color32::from_rgba_unmultiplied_const(0x2b, 0x30, 0x38, 0xe6);
-    const EDGE: Color32 = Color32::from_rgb(0x5e, 0x66, 0x72);
-    const INK: Color32 = Color32::from_rgb(0xdc, 0xe2, 0xea);
-    let g = p.layout_no_wrap(text.to_owned(), egui::FontId::proportional(10.5), INK);
-    let hint = if options { OPTIONS_HINT_W } else { 0.0 };
-    let size = vec2(g.size().x + 12.0 + hint, g.size().y + 6.0);
+/// The editable box's size: iStCAD's 162 px panel, 23 px high.
+const ENTRY_W: f32 = 162.0;
+const ENTRY_H: f32 = 23.0;
+
+/// The prompt hint: 10 pt `#D5E1E6` on `#1E2B31` at 73 %, corner 3, padding 5 × 2, at most 245 px
+/// wide (longer text ends in an ellipsis), kept inside the drawing.
+fn prompt_hint(p: &egui::Painter, at: Pos2, text: &str) -> Rect {
+    const FILL: Color32 = Color32::from_rgba_unmultiplied_const(0x1e, 0x2b, 0x31, 0xba);
+    const INK: Color32 = Color32::from_rgb(0xd5, 0xe1, 0xe6);
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), egui::FontId::proportional(10.0), INK);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(245.0);
+    let g = p.layout_job(job);
+    let size = vec2(g.size().x + 10.0, g.size().y + 4.0);
     let area = p.clip_rect();
-    let left = (at.x + 20.0).clamp(area.left() + 4.0, (area.right() - size.x - 4.0).max(area.left() + 4.0));
-    let top = (at.y + 22.0).clamp(area.top() + 4.0, (area.bottom() - size.y - 4.0).max(area.top() + 4.0));
-    let r = Rect::from_min_size(pos2(left, top), size);
-    p.rect(r, 2.0, FILL, Stroke::new(1.0, EDGE), egui::StrokeKind::Inside);
-    p.galley(pos2(r.left() + 6.0, r.top() + 3.0), g, INK);
-    if options {
-        options_hint(p, r);
-    }
+    let left = (at.x + 18.0).clamp(area.left() + 6.0, (area.right() - size.x - 6.0).max(area.left() + 6.0));
+    let top = (at.y + 21.0).clamp(area.top() + 6.0, (area.bottom() - size.y - 6.0).max(area.top() + 6.0));
+    let r = Rect::from_min_size(pos2(left, top).round(), size);
+    p.rect_filled(r, 3.0, FILL);
+    p.galley(pos2(r.left() + 5.0, r.top() + 2.0), g, INK);
     r
 }
 
-/// The input fields for prompt `pr`, as AutoCAD's dimensional and pointer input place them.
-fn input_fields(app: &CadApp, p: &egui::Painter, at: Pos2, pr: &cadcraft_engine::Prompt, typed: &str) {
-    let above = at + vec2(20.0, -34.0);
-    let units = length_units(&app.session);
-    let dist = |v: f64| cadcraft_engine::units::format_distance(v, units.0, units.1);
-    let deg = |a: f64| format!("{}°", (cadcraft_geom::norm_angle(a).to_degrees() * 10.0).round() / 10.0);
-    let Some(cursor) = app.canvas.cursor else { return };
-    // An angle about a base (rotation): one angle box.
-    if pr.angle && crate::cmdline::dyn_frame(app).is_some() {
-        let live = app.session.live_value(cursor).unwrap_or_default();
-        input_box(p, above, None, if typed.is_empty() { &live } else { typed }, !typed.is_empty(), true, false);
-        return;
-    }
-    if let Some(f) = crate::cmdline::dyn_frame(app)
-        && let Some(e) = crate::dyninput::parse(typed, &f)
-    {
-        use crate::dyninput::Format;
-        let (first_active, second_locked) = (app.cmd.first_active(), app.cmd.second_locked());
-        let (live1, live2) = f.live(e.format, cursor);
-        let first = if e.first.is_empty() { dist(live1) } else { e.first.to_owned() };
-        let second = if e.second.is_empty() {
-            match e.format {
-                Format::Cartesian => dist(live2),
-                Format::Polar => deg(live2),
-            }
-        } else {
-            e.second.to_owned()
-        };
-        let active1 = !e.split || first_active;
-        let locked1 = e.first_locked().is_some();
-        match (e.format, f.base, app.canvas.xf) {
-            // The distance along the rubber band, the angle by the pointer.
-            (Format::Polar, Some(base), Some(xf)) => {
-                let (a, b) = (xf.to_screen(base), at);
-                let mid = pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
-                let d = b - a;
-                let n = if d.length() > 1.0 { vec2(-d.y, d.x) / d.length() } else { vec2(0.0, -1.0) };
-                // To the side of the band away from the pointer's tooltip (above it on screen).
-                let n = if n.y > 0.0 { -n } else { n };
-                let r = input_box(p, mid + n * 16.0 - vec2(30.0, 10.0), None, &first, !e.first.is_empty(), active1, locked1);
-                // Keep the angle box clear of the distance box.
-                let mut angle_at = above;
-                if Rect::from_min_size(angle_at, vec2(70.0, 20.0)).intersects(r) {
-                    angle_at.y = r.top() - 24.0;
-                }
-                input_box(p, angle_at, Some("<"), &second, !e.second.is_empty(), e.split && !first_active, second_locked);
-            }
-            _ => {
-                let (l1, l2) = match e.format {
-                    Format::Cartesian => ("X", "Y"),
-                    Format::Polar => ("", "<"),
-                };
-                // Values measured from the last point are marked "@".
-                let at1 = if f.relative() { Some("@") } else { (!l1.is_empty()).then_some(l1) };
-                let r = input_box(p, above, at1, &first, !e.first.is_empty(), active1, locked1);
-                input_box(p, pos2(r.right() + 4.0, r.top()), Some(l2), &second, !e.second.is_empty(), e.split && !first_active, second_locked);
-            }
-        }
-        return;
-    }
-    // Other prompts (a number, a name, an option): one box with what is typed, or the live value.
-    let live = app.session.live_value(cursor);
-    let shown = if typed.is_empty() { live.as_deref().unwrap_or("") } else { typed };
-    if typed.is_empty() && shown.is_empty() && !pr.accept.text && !pr.accept.number {
-        return;
-    }
-    input_box(p, above, None, shown, !typed.is_empty(), true, false);
-}
-
-/// One input box at `at` (its top left, kept inside the drawing): an optional label before it,
-/// the text white when typed (with the caret if `active`) or dimmed when live, the accent border
-/// when active, a lock when `locked`. Returns its rectangle.
-fn input_box(p: &egui::Painter, at: Pos2, label: Option<&str>, text: &str, typed: bool, active: bool, locked: bool) -> Rect {
+/// The editable box in `r`: a `↳` (`#C0C5CE`) and a 143 × 23 field, `#4A515B` with a
+/// `#858B94` border, the typed text white at 11 pt with the caret.
+fn entry(p: &egui::Painter, r: Rect, text: &str) {
     const FIELD: Color32 = Color32::from_rgb(0x4a, 0x51, 0x5b);
     const EDGE: Color32 = Color32::from_rgb(0x85, 0x8b, 0x94);
-    const DIM: Color32 = Color32::from_rgb(0xa9, 0xb0, 0xba);
-    let t = Tokens::get();
-    let font = egui::FontId::proportional(11.0);
-    let label_g = label.filter(|l| !l.is_empty()).map(|l| p.layout_no_wrap(l.to_owned(), font.clone(), DIM));
-    let value = p.layout_no_wrap(text.to_owned(), font, if typed { Color32::WHITE } else { DIM });
-    let lw = label_g.as_ref().map_or(0.0, |g| g.size().x + 4.0);
-    let w = lw + (value.size().x + 12.0 + if locked { 12.0 } else { 0.0 }).max(52.0);
-    let h = 20.0;
-    let area = p.clip_rect();
-    let left = at.x.clamp(area.left() + 4.0, (area.right() - w - 4.0).max(area.left() + 4.0));
-    let top = at.y.clamp(area.top() + 4.0, (area.bottom() - h - 4.0).max(area.top() + 4.0));
-    let r = Rect::from_min_size(pos2(left, top), vec2(w, h));
+    const ARROW: Color32 = Color32::from_rgb(0xc0, 0xc5, 0xce);
     let cy = r.center().y;
-    if let Some(g) = label_g {
-        let gy = cy - g.size().y / 2.0;
-        p.galley(pos2(r.left(), gy), g, DIM);
-    }
-    let b = Rect::from_min_max(pos2(r.left() + lw, r.top()), r.max);
-    p.rect(b, 2.0, FIELD, if active { Stroke::new(1.5, t.accent) } else { Stroke::new(1.0, EDGE) }, egui::StrokeKind::Inside);
-    let vw = value.size().x;
-    p.galley(pos2(b.left() + 5.0, cy - value.size().y / 2.0), value, Color32::WHITE);
-    if typed && active {
-        let cx = b.left() + 6.0 + vw;
-        p.line_segment([pos2(cx, b.top() + 4.0), pos2(cx, b.bottom() - 4.0)], Stroke::new(1.0, Color32::WHITE));
-    }
-    if locked {
-        draw_lock(p, pos2(b.right() - 8.0, cy), t.accent);
-    }
-    r
+    // The `↳` drawn as strokes, so it shows whatever fonts are installed.
+    let ink = Stroke::new(1.2, ARROW);
+    let (x0, x1) = (r.left() + 3.0, r.left() + 13.0);
+    p.line_segment([pos2(x0, cy - 6.0), pos2(x0, cy + 2.0)], ink);
+    p.line_segment([pos2(x0, cy + 2.0), pos2(x1, cy + 2.0)], ink);
+    p.line_segment([pos2(x1 - 3.5, cy - 1.5), pos2(x1, cy + 2.0)], ink);
+    p.line_segment([pos2(x1 - 3.5, cy + 5.5), pos2(x1, cy + 2.0)], ink);
+    let b = Rect::from_min_size(pos2(r.right() - 143.0, r.top()), vec2(143.0, ENTRY_H));
+    p.rect(b, 0.0, FIELD, Stroke::new(1.0, EDGE), egui::StrokeKind::Inside);
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), egui::FontId::proportional(11.0), Color32::WHITE);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(b.width() - 10.0);
+    let g = p.layout_job(job);
+    let cx = (b.left() + 5.0 + g.size().x + 1.0).min(b.right() - 3.0);
+    p.galley(pos2(b.left() + 5.0, cy - g.size().y / 2.0), g, Color32::WHITE);
+    p.line_segment([pos2(cx, b.top() + 5.0), pos2(cx, b.bottom() - 5.0)], Stroke::new(1.0, Color32::WHITE));
 }

@@ -135,14 +135,22 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
     h.run_steps(3);
     save(&mut h, "04-line-dyn");
 
-    // After the first point: the command tooltip apart from the input fields, the distance on
-    // the rubber band and the angle by the pointer.
+    // After the first point: the prompt hint alone until something is typed, then the `↳` box
+    // apart from it, as iStCAD 1.0.231 shows them.
     click(&mut h, pos2(700.0, 450.0));
     h.event(egui::Event::PointerMoved(pos2(860.0, 380.0)));
     h.run_steps(3);
     let shown = painted(&h);
-    assert!(shown.iter().any(|t| t.starts_with("Specify next point")), "the command tooltip: {shown:?}");
-    assert!(shown.iter().any(|t| t == "<"), "the angle field: {shown:?}");
+    assert!(shown.iter().any(|t| t.starts_with("Specify next point")), "the prompt hint: {shown:?}");
+    assert!(h.state().istcad.dyn_box.is_none(), "no input box before typing");
+    h.state_mut().cmd.buffer = "25".into();
+    h.run_steps(2);
+    let shown = painted(&h);
+    assert!(shown.iter().any(|t| t == "25"), "the input box with what is typed: {shown:?}");
+    let opened = h.state().istcad.dyn_box.expect("the box opened");
+    h.event(egui::Event::PointerMoved(pos2(900.0, 360.0)));
+    h.run_steps(2);
+    assert_eq!(h.state().istcad.dyn_box, Some(opened), "the box stays where it opened while typing");
     save(&mut h, "06-line-dyn-polar");
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
