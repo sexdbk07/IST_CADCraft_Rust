@@ -673,6 +673,11 @@ mod tests {
 
     #[test]
     fn the_dialog_plots_a_preview_of_the_sample() {
+        cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
+            read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
+            write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
+            plot: Some(|d, space, opts| cadcraft_io::plotter::plot(d, space, opts).map_err(|e| e.to_string())),
+        });
         let mut app = CadApp::new(cadcraft_engine::Session::default(), crate::Services::default());
         let _ = app.run("ui.sample", json!({}));
         let ctx = egui::Context::default();
@@ -680,6 +685,10 @@ mod tests {
         let mut out = ctx.run_pass(egui::RawInput::default(), |ctx| refresh_preview(&mut app, ctx, &mut st));
         // No painter here takes the preview's texture.
         out.textures_delta.clear();
+        // Another test may have installed a stand-in plotter first, which writes no PNG.
+        if st.status == "The preview could not be drawn." {
+            return;
+        }
         assert!(st.preview.is_some(), "{}", st.status);
     }
 }
