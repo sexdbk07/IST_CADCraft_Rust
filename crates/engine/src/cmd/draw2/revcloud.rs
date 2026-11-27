@@ -209,6 +209,9 @@ impl RevcloudM {
 }
 
 impl Interactive for RevcloudM {
+    fn snap_objects(&self, _s: &Session) -> Vec<cadcraft_doc::EntityKind> {
+        if self.object { Vec::new() } else { crate::cmd::helpers::picked_path(&self.pts, false) }
+    }
     fn name(&self) -> &'static str {
         "REVCLOUD"
     }

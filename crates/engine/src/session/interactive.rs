@@ -660,6 +660,33 @@ impl Session {
         }
     }
 
+    /// The drawing object snaps search: the active one, with what the running command has
+    /// placed but not yet added to it ([`Interactive::snap_objects`]: leader points, a spline's
+    /// fit so far…), in the space being edited.
+    pub fn snap_drawing(&mut self) -> Result<std::sync::Arc<cadcraft_doc::Drawing>> {
+        let st = self.state()?;
+        let (base, space) = (st.doc.clone(), st.edit_space());
+        let extra = self.running.as_ref().map(|r| r.machine.snap_objects(self)).unwrap_or_default();
+        if extra.is_empty() {
+            self.snap_extra = None;
+            return Ok(base);
+        }
+        if let Some((b, k, d)) = &self.snap_extra
+            && std::sync::Arc::ptr_eq(b, &base)
+            && *k == extra
+        {
+            return Ok(d.clone());
+        }
+        let mut d = (*base).clone();
+        let common = self.current_common();
+        for k in &extra {
+            d.add(&space, common.clone(), k.clone())?;
+        }
+        let d = std::sync::Arc::new(d);
+        self.snap_extra = Some((base, extra, d.clone()));
+        Ok(d)
+    }
+
     /// Preview entities for the cursor: objects drawn with their own properties
     /// ([`Interactive::preview_objects`]), then the rubber band with the current properties, in
     /// the grip blue over such objects (so it shows over their fills, whatever their colour).

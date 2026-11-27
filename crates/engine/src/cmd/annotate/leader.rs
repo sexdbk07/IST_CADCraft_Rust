@@ -56,6 +56,9 @@ enum Annotation {
 }
 
 impl Interactive for LeaderM {
+    fn snap_objects(&self, _s: &Session) -> Vec<cadcraft_doc::EntityKind> {
+        crate::cmd::helpers::picked_path(&self.pts, false)
+    }
     fn name(&self) -> &'static str {
         "LEADER"
     }

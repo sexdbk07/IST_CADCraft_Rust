@@ -57,6 +57,9 @@ pub(super) struct WipeoutM {
 }
 
 impl Interactive for WipeoutM {
+    fn snap_objects(&self, _s: &Session) -> Vec<cadcraft_doc::EntityKind> {
+        if self.phase == 0 { crate::cmd::helpers::picked_path(&self.pts, false) } else { Vec::new() }
+    }
     fn name(&self) -> &'static str {
         "WIPEOUT"
     }

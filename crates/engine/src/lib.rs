@@ -161,6 +161,10 @@ pub struct Session {
     /// Object snap tracking: acquired points and the path under the cursor (from the UI's
     /// [`Session::snap_cursor`] calls; direct distance entry follows the path).
     pub tracking: snap::tracking::Tracker,
+    /// The drawing object snaps search while a command runs, with what it has placed but not
+    /// yet added ([`Interactive::snap_objects`]), kept while neither changes: (drawing, those
+    /// objects, the drawing with them).
+    snap_extra: Option<(std::sync::Arc<cadcraft_doc::Drawing>, Vec<cadcraft_doc::EntityKind>, std::sync::Arc<cadcraft_doc::Drawing>)>,
     /// Viewport size in pixels (from the UI; used for zoom and pick apertures).
     pub viewport_px: (f64, f64),
     pub clipboard: Vec<Entity>,
@@ -239,6 +243,7 @@ impl Session {
             picked_viewport: None,
             compare: None,
             tracking: snap::tracking::Tracker::default(),
+            snap_extra: None,
             viewport_px: (1200.0, 800.0),
             clipboard: Vec::new(),
             clipboard_base: Vec2::ZERO,

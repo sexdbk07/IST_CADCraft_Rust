@@ -523,6 +523,9 @@ impl Interactive for MeasureM {
     fn preview(&self, s: &Session, cursor: Vec2) -> Vec<EntityKind> {
         self.inner.as_ref().map(|m| m.preview(s, cursor)).unwrap_or_default()
     }
+    fn snap_objects(&self, s: &Session) -> Vec<EntityKind> {
+        self.inner.as_ref().map(|m| m.snap_objects(s)).unwrap_or_default()
+    }
 }
 
 /// MEASUREGEOM's Angle option and Tools > Inquiry > Angle: the angle of an arc, of two points on a

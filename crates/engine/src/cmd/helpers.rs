@@ -23,6 +23,15 @@ pub fn lwpoly(vs: Vec<PolyVertex>, closed: bool) -> EntityKind {
     EntityKind::LwPolyline(cadcraft_doc::LwPolyline { vertices: vs, closed, const_width: 0.0, elevation: 0.0, plinegen: false })
 }
 
+/// The path through `pts` picked so far, for [`crate::Interactive::snap_objects`]: an open
+/// polyline (closed with `closed`), nothing before two points.
+pub fn picked_path(pts: &[Vec2], closed: bool) -> Vec<EntityKind> {
+    if pts.len() < 2 {
+        return Vec::new();
+    }
+    vec![lwpoly(pts.iter().copied().map(PolyVertex::new).collect(), closed && pts.len() > 2)]
+}
+
 pub fn rect_vertices(a: Vec2, b: Vec2) -> Vec<PolyVertex> {
     [a, Vec2::new(b.x, a.y), b, Vec2::new(a.x, b.y)].into_iter().map(PolyVertex::new).collect()
 }

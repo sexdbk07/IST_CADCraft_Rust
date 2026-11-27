@@ -83,6 +83,15 @@ impl Interactive for Guarded {
             Vec::new()
         })
     }
+    fn snap_objects(&self, s: &Session) -> Vec<EntityKind> {
+        if self.broken.get().is_some() {
+            return Vec::new();
+        }
+        catch_unwind(AssertUnwindSafe(|| self.inner.snap_objects(s))).unwrap_or_else(|_| {
+            self.broken.set(Some("panic in preview"));
+            Vec::new()
+        })
+    }
     fn preview_objects(&self, s: &Session, cursor: Vec2) -> Vec<cadcraft_doc::Entity> {
         if self.broken.get().is_some() {
             return Vec::new();

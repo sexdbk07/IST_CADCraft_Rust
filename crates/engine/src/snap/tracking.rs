@@ -789,7 +789,9 @@ impl crate::Session {
         s.orthomode ^= q.shift;
         let angbase = self.angle_settings().angbase;
         let Ok(st) = self.state() else { return CursorSnap { point: raw, ..Default::default() } };
-        let (doc, space) = (st.doc.clone(), st.edit_space());
+        let space = st.edit_space();
+        // What the running command has placed but not yet added snaps too.
+        let Ok(doc) = self.snap_drawing() else { return CursorSnap { point: raw, ..Default::default() } };
         if !raw.is_finite() {
             return CursorSnap { point: raw, ..Default::default() };
         }

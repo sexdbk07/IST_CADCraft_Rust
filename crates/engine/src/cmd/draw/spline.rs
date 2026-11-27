@@ -48,6 +48,9 @@ impl SplineM {
 }
 
 impl Interactive for SplineM {
+    fn snap_objects(&self, _s: &Session) -> Vec<cadcraft_doc::EntityKind> {
+        if self.cv.is_some() || self.pts.len() < 2 { Vec::new() } else { vec![cadcraft_doc::EntityKind::Spline(self.make(false))] }
+    }
     fn name(&self) -> &'static str {
         "SPLINE"
     }

@@ -348,7 +348,8 @@ impl Session {
                     let hatch = if self.settings.osnaphatch { mode::HATCH } else { 0 };
                     let base = prompt.as_ref().and_then(|q| q.base);
                     let deferred = prompt.as_ref().is_some_and(|q| q.deferred);
-                    let hit = crate::snap::osnap(self.doc()?, &space, p, aperture, mode | hatch, base, deferred);
+                    let d = self.snap_drawing()?;
+                    let hit = crate::snap::osnap(&d, &space, p, aperture, mode | hatch, base, deferred);
                     match hit {
                         Some(h) if self.point_mods.is_empty() => return self.input_snapped(h),
                         Some(h) => p = h.point,

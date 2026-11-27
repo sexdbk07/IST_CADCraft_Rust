@@ -39,7 +39,7 @@ jobs:
       - name: Engine command tests
         run: "cargo test --locked -p cadcraft-engine --lib -- cmd:: lasso grips::"
       - name: Engine Properties and groups tests
-        run: "cargo test --locked -p cadcraft-engine --test it -- properties_ groups::"
+        run: "cargo test --locked -p cadcraft-engine --test it -- properties_ groups:: snap_in_progress"
       - name: UI unit tests (iStCAD shell + theme)
         run: cargo test --locked -p cadcraft-ui-egui --lib -- istcad theme lasso
       - name: IO unit tests (DXF/DWG text and attributes)

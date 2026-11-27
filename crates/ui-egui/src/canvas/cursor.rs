@@ -294,13 +294,15 @@ pub(super) fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf) {
     let deferred = prompt.as_ref().is_some_and(|p| p.deferred);
     let s = &app.session.settings;
     let osmode = over.unwrap_or(s.osmode) | if s.osnaphatch { snap::mode::HATCH } else { 0 };
-    let Ok(st) = app.session.state() else { return };
+    let Ok(space) = app.session.state().map(|st| st.edit_space()) else { return };
+    // With what the running command has placed but not yet added.
+    let Ok(doc) = app.session.snap_drawing() else { return };
     let hit = match cycle {
         Some(i) => {
-            let cands = cadcraft_engine::pointmod::snap_candidates(&st.doc, &st.edit_space(), raw, ap, osmode, base, deferred);
+            let cands = cadcraft_engine::pointmod::snap_candidates(&doc, &space, raw, ap, osmode, base, deferred);
             cands.get(i % cands.len().max(1)).copied()
         }
-        None => snap::osnap(&st.doc, &st.edit_space(), raw, ap, osmode, base, deferred),
+        None => snap::osnap(&doc, &space, raw, ap, osmode, base, deferred),
     };
     let p = match (hit, app.canvas.snap) {
         (Some(h), _) => {

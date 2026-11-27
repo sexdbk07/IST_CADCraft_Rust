@@ -168,6 +168,7 @@ mod snap_curves;
 mod snap_intersections_aperture;
 mod snap_nearest;
 mod snap_overrides;
+mod snap_in_progress;
 mod snap_tracking;
 mod snaps_more;
 mod solid_command;

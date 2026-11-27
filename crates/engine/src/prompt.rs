@@ -329,6 +329,13 @@ pub trait Interactive: Send {
     fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
         Vec::new()
     }
+    /// What the command has placed so far but not yet added to the drawing (the leader or
+    /// boundary points picked, a spline's fit so far), for object snaps and tracking while it
+    /// goes on, as AutoCAD snaps to what a command has drawn. Commands that add their object as
+    /// they go (LINE, PLINE, 3DPOLY) need none.
+    fn snap_objects(&self, _s: &Session) -> Vec<EntityKind> {
+        Vec::new()
+    }
     /// Preview objects drawn with their own properties (colour, layer, linetype) rather than
     /// the current layer's, as [`Interactive::preview`]'s are: a block reference re-evaluated
     /// under the cursor, drawn as it will look. Drawn under the rubber band.
