@@ -134,6 +134,18 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
     h.event(egui::Event::PointerMoved(pos2(760.0, 430.0)));
     h.run_steps(3);
     save(&mut h, "04-line-dyn");
+
+    // After the first point: the command tooltip apart from the input fields, the distance on
+    // the rubber band and the angle by the pointer.
+    click(&mut h, pos2(700.0, 450.0));
+    h.event(egui::Event::PointerMoved(pos2(860.0, 380.0)));
+    h.run_steps(3);
+    let shown = painted(&h);
+    assert!(shown.iter().any(|t| t.starts_with("Specify next point")), "the command tooltip: {shown:?}");
+    assert!(shown.iter().any(|t| t == "<"), "the angle field: {shown:?}");
+    save(&mut h, "06-line-dyn-polar");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
 }
 
 /// The palette edits by hand, as a user does: click a value, type, Enter.
