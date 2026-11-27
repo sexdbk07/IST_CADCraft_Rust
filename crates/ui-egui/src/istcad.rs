@@ -1150,13 +1150,13 @@ pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
 fn more_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
     let s = &app.session.settings;
     let mut toggle = None;
-    // Right to left, so they read GRID DYN SNAP LWT QP.
+    // Right to left, so they read DYN GRID SNAP LWT QP.
     for (label, on, cmd, tip) in [
         ("QP", s.qpmode, "qpmode", "Quick Properties when objects are selected — click to toggle"),
         ("LWT", s.lwdisplay, "lwdisplay", "Show lineweights — click to toggle"),
         ("SNAP", s.snapmode, "snap", "Snap to the snap grid (F9) — click to toggle"),
-        ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer (F12)"),
         ("GRID", s.gridmode, "grid", "Show or hide the drawing grid (F7)"),
+        ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer (F12)"),
     ] {
         let w = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(8.0), Color32::WHITE).size().x + 8.0;
         if ui.available_width() < w + 4.0 {
