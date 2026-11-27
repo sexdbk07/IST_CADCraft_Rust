@@ -1139,22 +1139,23 @@ pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
         // LWT and QP toggles (GRID moved here from the right end). They may reach left past the column into the layout tabs' row, up to the
         // last tab.
         let tabs_end = tabs.right() + 12.0;
-        let from = (zoom_row.left() - 160.0).max(tabs_end).min(zoom.left() - 6.0);
+        let from = (zoom_row.left() - 200.0).max(tabs_end).min(zoom.left() - 6.0);
         let extra = Rect::from_min_max(pos2(from, zoom_row.top()), pos2((zoom.left() - 6.0).max(from), zoom_row.bottom()));
         row(ui, extra, egui::Layout::right_to_left(egui::Align::Center), |ui| more_toggles(app, ui));
     });
 }
 
-/// AutoCAD's Grid (F7), Snap (F9), Lineweight and Quick Properties toggles beside the zoom
-/// readout; they never cancel the running command.
+/// AutoCAD's Grid (F7), Dynamic Input (F12), Snap (F9), Lineweight and Quick Properties toggles
+/// beside the zoom readout; they never cancel the running command.
 fn more_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
     let s = &app.session.settings;
     let mut toggle = None;
-    // Right to left, so they read GRID SNAP LWT QP.
+    // Right to left, so they read GRID DYN SNAP LWT QP.
     for (label, on, cmd, tip) in [
         ("QP", s.qpmode, "qpmode", "Quick Properties when objects are selected — click to toggle"),
         ("LWT", s.lwdisplay, "lwdisplay", "Show lineweights — click to toggle"),
         ("SNAP", s.snapmode, "snap", "Snap to the snap grid (F9) — click to toggle"),
+        ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer (F12)"),
         ("GRID", s.gridmode, "grid", "Show or hide the drawing grid (F7)"),
     ] {
         let w = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(8.0), Color32::WHITE).size().x + 8.0;
@@ -1494,9 +1495,8 @@ fn drafting_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
     if icon_button(ui, vec2(38.0, 36.0), look(Glyph::Settings, ink::ICON, 1.2, 22.0), "Drafting settings", false).clicked() {
         toggle = Some("ui.dialog.dsettings");
     }
-    // Right to left, so the row reads OSNAP ORTHO POLAR OTRACK DYN, as iStCAD's.
+    // Right to left, so the row reads OSNAP ORTHO POLAR OTRACK (DYN is in the row below).
     for (label, on, cmd, tip) in [
-        ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer (F12)"),
         ("OTRACK", s.otrack, "otrack", "Object tracking (F11) — click to toggle"),
         ("POLAR", s.polarmode, "polar", "Polar tracking (F10) — click to toggle"),
         ("ORTHO", s.orthomode, "ortho", "Ortho mode (F8) — click to toggle"),
