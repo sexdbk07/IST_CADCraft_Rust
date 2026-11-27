@@ -374,8 +374,9 @@ fn istcad_layout_tab_renames_in_place() {
     click(&mut h, at);
     click(&mut h, at);
     h.run_steps(3);
-    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    assert_eq!(h.state().istcad.renaming_layout(), Some("Layout1"), "a double-click opens the tab's name for editing");
     h.event(egui::Event::Text("Sheet A".into()));
+    h.run_steps(1);
     h.key_press(egui::Key::Enter);
     h.run_steps(3);
     let names: Vec<String> = h.state().session.doc().unwrap().layouts.iter().map(|l| l.name.clone()).collect();

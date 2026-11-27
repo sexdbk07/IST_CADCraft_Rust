@@ -271,3 +271,34 @@ fn add_vertex_on_an_arc_segment_keeps_it_curved() {
     assert_eq!(out.vertices.len(), 3);
     assert!((out.vertices[0].bulge - quarter).abs() < 1e-9 && (out.vertices[1].bulge - quarter).abs() < 1e-9, "{out:?}");
 }
+
+#[test]
+fn dimensions_multileaders_and_hatches_have_grip_options() {
+    use super::{GripAction, grip_action, grip_actions};
+    let mut s = Session::new();
+    let d = h(&s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [10, 0], "at": [5, 3] })).unwrap());
+    let dim = kind(&s, d);
+    assert_eq!(grip_actions(&dim, 3), vec![GripAction::MoveTextOnly, GripAction::ResetText]);
+    let Some(EntityKind::Dimension(moved)) = grip_action(&dim, 3, GripAction::MoveTextOnly, Some(v(20.0, 9.0)), None) else { panic!("moves the text") };
+    assert!(near(moved.text_mid.xy(), 20.0, 9.0) && moved.user_text_pos);
+    let Some(EntityKind::Dimension(back)) = grip_action(&EntityKind::Dimension(moved), 3, GripAction::ResetText, None, None) else { panic!("resets") };
+    assert!(!back.user_text_pos);
+
+    let m = h(&s.execute("mleader", &json!({ "points": [[0, 0], [10, 10]], "text": "A" })).unwrap());
+    let ml = kind(&s, m);
+    let EntityKind::MLeader(m0) = &ml else { panic!() };
+    let landing = m0.leaders.iter().map(Vec::len).sum::<usize>();
+    let Some(two) = grip_action(&ml, landing, GripAction::AddLeader, Some(v(-5.0, 0.0)), None) else { panic!("adds a leader") };
+    let EntityKind::MLeader(m2) = &two else { panic!() };
+    assert_eq!(m2.leaders.len(), m0.leaders.len() + 1);
+    assert!(grip_actions(&two, 0).contains(&GripAction::RemoveLeader));
+    let Some(EntityKind::MLeader(m1)) = grip_action(&two, 0, GripAction::RemoveLeader, None, None) else { panic!("removes one") };
+    assert_eq!(m1.leaders.len(), m0.leaders.len());
+
+    s.execute("rectang", &json!({ "p1": [100, 0], "p2": [110, 10] })).unwrap();
+    let ha = h(&s.execute("hatch", &json!({ "points": [[105, 5]], "pattern": "ANSI31" })).unwrap());
+    let hk = kind(&s, ha);
+    let Some(EntityKind::Hatch(turned)) = grip_action(&hk, 0, GripAction::HatchAngle, None, Some(30.0)) else { panic!("turns the pattern") };
+    assert!((turned.angle.to_degrees() - 30.0).abs() < 1e-9);
+    assert!(grip_action(&hk, 0, GripAction::HatchScale, None, Some(0.0)).is_none(), "a zero scale is refused");
+}

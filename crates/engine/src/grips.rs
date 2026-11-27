@@ -353,6 +353,20 @@ pub enum GripAction {
     Lengthen,
     /// Arc midpoint: change the radius, keeping the center and angles.
     Radius,
+    /// Dimension text: move the text alone, the dimension line staying (DIMTMOVE 2).
+    MoveTextOnly,
+    /// Dimension text: back to its default place.
+    ResetText,
+    /// Multileader landing: add a leader line to a picked point.
+    AddLeader,
+    /// Multileader leader end: remove that leader line (one stays).
+    RemoveLeader,
+    /// Hatch: move the pattern's origin to a picked point.
+    HatchOrigin,
+    /// Hatch: the pattern's angle (a point from the grip, or degrees).
+    HatchAngle,
+    /// Hatch: the pattern's scale (a typed factor, or the distance to a point).
+    HatchScale,
 }
 
 impl GripAction {
@@ -365,6 +379,13 @@ impl GripAction {
             GripAction::ToLine => "conVert to line",
             GripAction::Lengthen => "Lengthen",
             GripAction::Radius => "Radius",
+            GripAction::MoveTextOnly => "Move text only",
+            GripAction::ResetText => "Reset text",
+            GripAction::AddLeader => "Add leader",
+            GripAction::RemoveLeader => "Remove leader",
+            GripAction::HatchOrigin => "Origin point",
+            GripAction::HatchAngle => "hatch Angle",
+            GripAction::HatchScale => "hatch Scale",
         }
     }
     /// The grip menu label.
@@ -376,6 +397,13 @@ impl GripAction {
             GripAction::ToLine => "Convert to Line",
             GripAction::Lengthen => "Lengthen",
             GripAction::Radius => "Radius",
+            GripAction::MoveTextOnly => "Move Text Only",
+            GripAction::ResetText => "Reset Text Position",
+            GripAction::AddLeader => "Add Leader",
+            GripAction::RemoveLeader => "Remove Leader",
+            GripAction::HatchOrigin => "Origin Point",
+            GripAction::HatchAngle => "Hatch Angle",
+            GripAction::HatchScale => "Hatch Scale",
         }
     }
     /// The mode name on the command line ("** ADD VERTEX **").
@@ -387,11 +415,18 @@ impl GripAction {
             GripAction::ToLine => "** CONVERT TO LINE **",
             GripAction::Lengthen => "** LENGTHEN **",
             GripAction::Radius => "** RADIUS **",
+            GripAction::MoveTextOnly => "** MOVE TEXT ONLY **",
+            GripAction::ResetText => "** RESET TEXT **",
+            GripAction::AddLeader => "** ADD LEADER **",
+            GripAction::RemoveLeader => "** REMOVE LEADER **",
+            GripAction::HatchOrigin => "** HATCH ORIGIN **",
+            GripAction::HatchAngle => "** HATCH ANGLE **",
+            GripAction::HatchScale => "** HATCH SCALE **",
         }
     }
     /// Whether the option needs a point (or value); the others act at once.
     pub fn needs_point(self) -> bool {
-        !matches!(self, GripAction::RemoveVertex | GripAction::ToLine)
+        !matches!(self, GripAction::RemoveVertex | GripAction::ToLine | GripAction::ResetText | GripAction::RemoveLeader)
     }
 }
 
@@ -412,8 +447,35 @@ pub fn grip_actions(kind: &EntityKind, index: usize) -> Vec<GripAction> {
         EntityKind::Line(_) if index == 0 || index == 2 => vec![GripAction::Lengthen],
         EntityKind::Arc(_) if index == 0 || index == 2 => vec![GripAction::Lengthen],
         EntityKind::Arc(_) if index == 1 => vec![GripAction::Radius],
+        // A dimension's text grip (the fourth).
+        EntityKind::Dimension(_) if index == 3 => vec![GripAction::MoveTextOnly, GripAction::ResetText],
+        // A multileader's landing grip (the last) adds a leader; a leader's end grip (its
+        // first point) removes that leader while another stays.
+        EntityKind::MLeader(m) => {
+            let points: usize = m.leaders.iter().map(Vec::len).sum();
+            if index == points {
+                vec![GripAction::AddLeader]
+            } else if m.leaders.len() > 1 && leader_start(m, index).is_some() {
+                vec![GripAction::RemoveLeader]
+            } else {
+                Vec::new()
+            }
+        }
+        EntityKind::Hatch(h) if index == 0 && !h.solid => vec![GripAction::HatchOrigin, GripAction::HatchAngle, GripAction::HatchScale],
         _ => Vec::new(),
     }
+}
+
+/// The leader whose first point (its arrow end) is grip `index` of multileader `m`.
+fn leader_start(m: &cadcraft_doc::MLeader, index: usize) -> Option<usize> {
+    let mut at = 0;
+    for (i, l) in m.leaders.iter().enumerate() {
+        if index == at && !l.is_empty() {
+            return Some(i);
+        }
+        at += l.len();
+    }
+    None
 }
 
 /// The bulges of the two segments `a`→`p` and `p`→`b` that replace segment `a`→`b` (bulge `bulge`)
@@ -526,6 +588,58 @@ pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Opti
             if !(sweep > 1e-9 && sweep < cadcraft_geom::TAU - 1e-9) {
                 return None;
             }
+        }
+        (EntityKind::Dimension(d), GripAction::MoveTextOnly) => {
+            let to = to?;
+            d.text_mid = Vec3::new(to.x, to.y, d.text_mid.z);
+            d.user_text_pos = true;
+            d.block = None;
+            // DIMTMOVE 2: the text moves without a leader and the dimension line stays.
+            d.overrides.insert("textMove".into(), json!(2));
+        }
+        (EntityKind::Dimension(d), GripAction::ResetText) => {
+            d.user_text_pos = false;
+            d.text_rotation = 0.0;
+            d.block = None;
+            d.overrides.remove("textMove");
+            d.overrides.remove("textJust");
+        }
+        (EntityKind::MLeader(m), GripAction::AddLeader) => {
+            let to = to?;
+            m.leaders.push(vec![Vec3::new(to.x, to.y, m.landing.z)]);
+        }
+        (EntityKind::MLeader(m), GripAction::RemoveLeader) => {
+            let i = leader_start(m, index)?;
+            if m.leaders.len() < 2 {
+                return None;
+            }
+            m.leaders.remove(i);
+        }
+        (EntityKind::Hatch(h), GripAction::HatchOrigin) => h.origin = to?,
+        (EntityKind::Hatch(h), GripAction::HatchAngle) => {
+            let deg = match (value, to) {
+                (Some(v), _) => v,
+                (None, Some(p)) => {
+                    let c = kind.grips().first().copied()?;
+                    if p.near(c, EPS) {
+                        return None;
+                    }
+                    c.angle_to(p).to_degrees()
+                }
+                _ => return None,
+            };
+            h.angle = norm_angle(deg.to_radians());
+        }
+        (EntityKind::Hatch(h), GripAction::HatchScale) => {
+            let f = match (value, to) {
+                (Some(v), _) => v,
+                (None, Some(p)) => kind.grips().first().copied()?.dist(p),
+                _ => return None,
+            };
+            if !(f > EPS && f < 1e9) {
+                return None;
+            }
+            h.scale = f;
         }
         (EntityKind::Arc(a), GripAction::Radius) => {
             let r = match (value, to) {

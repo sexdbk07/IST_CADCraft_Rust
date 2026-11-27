@@ -180,6 +180,12 @@ impl Shell {
     }
 
     /// How often `id` was started (saved counts included).
+    /// The layout tab being renamed in place, if any.
+    #[cfg(test)]
+    pub(crate) fn renaming_layout(&self) -> Option<&str> {
+        self.renaming.as_ref().map(|(from, _, _)| from.as_str())
+    }
+
     pub fn uses(&self, id: &str) -> u32 {
         self.usage.get(id).copied().unwrap_or(0)
     }
@@ -1401,6 +1407,10 @@ fn layout_tabs(app: &mut CadApp, ui: &mut egui::Ui) {
                 let resp = ui.add_sized(vec2(width, 24.0), egui::TextEdit::singleline(text).id(id).font(FontId::proportional(12.0)));
                 if std::mem::take(focus) {
                     resp.request_focus();
+                    // The name opens selected: typing replaces it.
+                    let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+                    state.cursor.set_char_range(Some(egui::text_selection::CCursorRange::select_all_str(text)));
+                    state.store(ui.ctx(), id);
                 }
                 let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
                 if resp.lost_focus() {
