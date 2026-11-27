@@ -359,10 +359,11 @@ fn istcad_tracking_follows_an_acquired_point() {
     assert!((cursor.y - end.y).abs() < 1e-9, "the cursor sits on the end's horizontal: {cursor:?} vs {end:?}");
 }
 
-/// A layout tab is renamed in place: double-click, type, Enter.
+/// A layout tab is renamed in place: double-click, type, Enter. (Short steps, so the two clicks
+/// fall within egui's double-click time.)
 #[test]
 fn istcad_layout_tab_renames_in_place() {
-    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).build_ui_state(
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).with_step_dt(0.02).build_ui_state(
         |ui, app: &mut CadApp| {
             app.logic(&ui.ctx().clone());
             app.ui(ui);
