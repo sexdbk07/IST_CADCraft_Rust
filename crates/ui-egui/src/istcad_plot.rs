@@ -677,7 +677,7 @@ mod tests {
         let _ = app.run("ui.sample", json!({}));
         let ctx = egui::Context::default();
         let mut st = State { settings: Settings::new(&app), preview: None, shown: None, changed_at: 0.0, status: String::new(), picking: false };
-        let _ = ctx.run(egui::RawInput::default(), |ctx| refresh_preview(&mut app, ctx, &mut st));
+        let _ = ctx.run_pass(egui::RawInput::default(), |ctx| refresh_preview(&mut app, ctx, &mut st));
         assert!(st.preview.is_some(), "{}", st.status);
     }
 }
