@@ -1105,16 +1105,15 @@ fn pin_button(ui: &mut egui::Ui, pinned: bool) -> egui::Response {
 
 // ---------------------------------------------------------------- command dock
 
-/// Row 5, 86 points: the command line over the layout tabs (4.0 parts of the width), the
-/// drafting toggles over the zoom controls (1.4 parts).
+/// Row 5, 86 points: the command line over the layout tabs (4.35 parts of the width), the
+/// drafting toggles over the zoom controls (1.05 parts), SNAP LWT QP left of the zoom readout.
 pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let frame =
         egui::Frame::NONE.fill(t.chrome).stroke(Stroke::new(1.0, t.cmd_border)).corner_radius(egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 });
     egui::Panel::bottom("ist_dock").exact_size(DOCK_H).frame(frame).show(ui, |ui| {
         let r = ui.max_rect();
-        // iStCAD's 4.35 : 1.05, widened to 4.0 : 1.4 for AutoCAD's eight status toggles.
-        let split = r.left() + r.width() * 4.0 / 5.4;
+        let split = r.left() + r.width() * 4.35 / 5.4;
         let left = Rect::from_min_max(pos2(r.left() + 8.0, r.top() + 5.0), pos2(split, r.bottom() - 2.0));
         let right = Rect::from_min_max(pos2(split + 8.0, r.top() + 5.0), pos2(r.right() - 14.0, r.bottom() - 2.0));
         let bar = Rect::from_min_size(left.min, vec2(left.width(), 40.0));
@@ -1127,18 +1126,36 @@ pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
         row(ui, tabs_row, egui::Layout::left_to_right(egui::Align::Center), |ui| layout_tabs(app, ui));
         row(ui, toggles_row, egui::Layout::right_to_left(egui::Align::Center), |ui| drafting_toggles(app, ui));
         let zoom = row(ui, zoom_row, egui::Layout::right_to_left(egui::Align::Center), |ui| zoom_controls(app, ui, t));
-        // iStCAD's three view glyphs go left of the zoom controls, as many as fit beside them.
-        let glyphs = Rect::from_min_max(zoom_row.min, pos2((zoom.left() - 6.0).max(zoom_row.left()), zoom_row.bottom()));
-        row(ui, glyphs, egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            for glyph in ["▧", "▣", "⚙"] {
-                if ui.available_width() < 20.0 {
-                    break;
-                }
-                ui.label(RichText::new(glyph).size(13.0).color(t.canvas_ink));
-                ui.add_space(12.0);
-            }
-        });
+        // Where iStCAD has three view glyphs, left of the zoom readout: AutoCAD's SNAP, LWT and
+        // QP toggles, as many as fit.
+        let extra = Rect::from_min_max(zoom_row.min, pos2((zoom.left() - 6.0).max(zoom_row.left()), zoom_row.bottom()));
+        row(ui, extra, egui::Layout::right_to_left(egui::Align::Center), |ui| more_toggles(app, ui));
     });
+}
+
+/// AutoCAD's Snap (F9), Lineweight and Quick Properties toggles beside the zoom readout; they
+/// never cancel the running command.
+fn more_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
+    let s = &app.session.settings;
+    let mut toggle = None;
+    // Right to left, so they read SNAP LWT QP.
+    for (label, on, cmd, tip) in [
+        ("QP", s.qpmode, "qpmode", "Quick Properties when objects are selected — click to toggle"),
+        ("LWT", s.lwdisplay, "lwdisplay", "Show lineweights — click to toggle"),
+        ("SNAP", s.snapmode, "snap", "Snap to the snap grid (F9) — click to toggle"),
+    ] {
+        let w = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(8.0), Color32::WHITE).size().x + 8.0;
+        if ui.available_width() < w + 4.0 {
+            break;
+        }
+        if status_toggle(ui, label, on, tip, vec2(w, 18.0), 8.0).clicked() {
+            toggle = Some(cmd);
+        }
+        ui.add_space(5.0);
+    }
+    if let Some(c) = toggle {
+        crate::menus::run_transparent(app, c);
+    }
 }
 
 /// Lay out `add` inside `rect` with `layout`.
@@ -1426,17 +1443,13 @@ fn drafting_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
     if icon_button(ui, vec2(38.0, 36.0), look(Glyph::Settings, ink::ICON, 1.2, 22.0), "Drafting settings", false).clicked() {
         toggle = Some("ui.dialog.dsettings");
     }
-    // Right to left, so the row reads as AutoCAD's status bar: SNAP ORTHO POLAR OSNAP OTRACK
-    // LWT DYN QP, iStCAD's five with AutoCAD's Snap, Lineweight and Quick Properties.
+    // Right to left, so the row reads OSNAP ORTHO POLAR OTRACK DYN, as iStCAD's.
     for (label, on, cmd, tip) in [
-        ("QP", s.qpmode, "qpmode", "Quick Properties when objects are selected — click to toggle"),
         ("DYN", s.dynmode, "dynmode", "Dynamic input near the pointer (F12)"),
-        ("LWT", s.lwdisplay, "lwdisplay", "Show lineweights — click to toggle"),
         ("OTRACK", s.otrack, "otrack", "Object tracking (F11) — click to toggle"),
-        ("OSNAP", s.osmode & mode::OFF == 0 && s.osmode != 0, "osnap", "Object Snap (F3) — click to toggle; right-click to choose snap modes"),
         ("POLAR", s.polarmode, "polar", "Polar tracking (F10) — click to toggle"),
         ("ORTHO", s.orthomode, "ortho", "Ortho mode (F8) — click to toggle"),
-        ("SNAP", s.snapmode, "snap", "Snap to the snap grid (F9) — click to toggle"),
+        ("OSNAP", s.osmode & mode::OFF == 0 && s.osmode != 0, "osnap", "Object Snap (F3) — click to toggle; right-click to choose snap modes"),
     ] {
         ui.add_space(5.0);
         let w = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(8.0), Color32::WHITE).size().x + 8.0;
