@@ -677,7 +677,9 @@ mod tests {
         let _ = app.run("ui.sample", json!({}));
         let ctx = egui::Context::default();
         let mut st = State { settings: Settings::new(&app), preview: None, shown: None, changed_at: 0.0, status: String::new(), picking: false };
-        let _ = ctx.run_pass(egui::RawInput::default(), |ctx| refresh_preview(&mut app, ctx, &mut st));
+        let mut out = ctx.run_pass(egui::RawInput::default(), |ctx| refresh_preview(&mut app, ctx, &mut st));
+        // No painter here takes the preview's texture.
+        out.textures_delta.clear();
         assert!(st.preview.is_some(), "{}", st.status);
     }
 }
