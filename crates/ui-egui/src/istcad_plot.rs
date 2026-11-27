@@ -7,16 +7,19 @@
 //! - **Plot layout**: what to plot (Model: Extents, Display, Window, picking the window when
 //!   chosen; a layout: its sheet), Fit to paper or a scale (1:1 … 5:1, Custom mm = units), Center
 //!   the plot or an X/Y offset in mm, and the scale a fitted plot comes to.
-//! - **Plot style**: Color, Grayscale or Black (the built-in colour-dependent tables), object
-//!   lineweights, and opening the PDF after the plot.
+//! - **Plot style**: Color, Grayscale, Black (the built-in colour-dependent tables) or Custom
+//!   pens, object lineweights, and opening the PDF after the plot. Custom pens is iStCAD's inline
+//!   pen table: for each of the 255 index colours an output colour and a lineweight, kept in the
+//!   drawing's colour-dependent table "iStCAD pens.ctb" (made on first use, through
+//!   STYLESMANAGER).
 //!
 //! The preview is the sheet as the `plot` command draws it, redrawn a quarter second after the
 //! last change. The footer: what is plotted, then All layouts → PDF, Apply to layout (a layout's
 //! page setup), Plot PDF and Close. Everything plots through `plot` and `pagesetup`, as the
 //! automation interface does.
 //!
-//! iStCAD's custom pen table, scaled lineweights, default lineweight and its layout viewport
-//! card have no equivalent in the `plot` command yet: Custom pens shows disabled and says so.
+//! iStCAD's scaled lineweights, default lineweight and its layout viewport card have no
+//! equivalent in the `plot` command yet.
 
 use egui::{Color32, CornerRadius, Frame, Margin, RichText, Stroke, TextureHandle, vec2};
 use serde_json::{Value, json};
@@ -55,8 +58,33 @@ const SCALES: &[(&str, f64, f64)] = &[
     ("Custom", -1.0, -1.0),
 ];
 
-/// The plot style tables behind Color, Grayscale and Black.
-const STYLES: &[(&str, &str)] = &[("Color", "None"), ("Grayscale", "grayscale.ctb"), ("Black", "monochrome.ctb")];
+/// The drawing's table behind Custom pens: one style per index colour (Color_1 … Color_255).
+pub(crate) const PENS: &str = "iStCAD pens.ctb";
+
+/// The plot style tables behind Color, Grayscale, Black and Custom pens.
+const STYLES: &[(&str, &str)] = &[("Color", "None"), ("Grayscale", "grayscale.ctb"), ("Black", "monochrome.ctb"), ("Custom pens", PENS)];
+
+/// iStCAD's pen output colours: name and `#rrggbb` (none: the object's colour).
+const PEN_COLORS: &[(&str, Option<&str>)] = &[
+    ("Use object color", None),
+    ("Black", Some("#000000")),
+    ("White", Some("#FFFFFF")),
+    ("Red", Some("#FF0000")),
+    ("Yellow", Some("#FFFF00")),
+    ("Green", Some("#00FF00")),
+    ("Cyan", Some("#00FFFF")),
+    ("Blue", Some("#0000FF")),
+    ("Magenta", Some("#FF00FF")),
+    ("Gray", Some("#808080")),
+];
+
+/// A change to one pen: its index colour, the output colour (`None`: the object's), the
+/// lineweight in mm (`None`: the object's).
+#[derive(Clone, Debug, PartialEq)]
+enum PenEdit {
+    Color(u8, Option<&'static str>),
+    Weight(u8, Option<f64>),
+}
 
 const BG: Color32 = Color32::from_rgb(238, 241, 245);
 const CARD_EDGE: Color32 = Color32::from_rgb(210, 216, 224);
@@ -86,6 +114,10 @@ pub(crate) struct Settings {
     pub style: usize,
     pub lineweights: bool,
     pub open_after: bool,
+    /// The pen being set (an index colour, 1–255), and a count of pen changes so the preview
+    /// follows them.
+    pub pen: u8,
+    pub pens_rev: u32,
 }
 
 impl Settings {
@@ -110,7 +142,14 @@ impl Settings {
             style: 2,
             lineweights: true,
             open_after: true,
+            pen: 1,
+            pens_rev: 0,
         }
+    }
+
+    /// What the preview depends on: everything but which pen is being set.
+    fn preview_key(&self) -> Settings {
+        Settings { pen: 0, ..self.clone() }
     }
 
     /// The paper's short and long sides in mm.
@@ -292,6 +331,8 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Option<
     }
     let area = area_size(app, &st.settings);
     let (mut plot, mut all, mut apply, mut close, mut pick) = (false, false, false, false, false);
+    let mut pen_edit = None;
+    let pens = app.session.doc().ok().and_then(|d| d.plot_style_tables.iter().find(|t| t.name.eq_ignore_ascii_case(PENS)).cloned());
     let title = format!("{} - {}", crate::tl!("Plot (PDF)"), st.settings.target);
     let center = ctx.content_rect().center();
     egui::Window::new(title.clone())
@@ -330,7 +371,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Option<
                 ui.allocate_ui_with_layout(vec2(470.0, body_h), egui::Layout::top_down(egui::Align::Min), |ui| {
                     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 8.0;
-                        left_column(ui, &mut st.settings, model, area, &mut pick);
+                        pen_edit = left_column(ui, &mut st.settings, model, area, &mut pick, pens.as_ref());
                     });
                 });
                 ui.add_space(10.0);
@@ -381,11 +422,17 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Option<
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         close = true;
     }
-    if st.settings != before {
+    if let Some(e) = pen_edit {
+        match apply_pen(app, &e) {
+            Ok(()) => st.settings.pens_rev += 1,
+            Err(e) => st.status = e,
+        }
+    }
+    if st.settings.preview_key() != before.preview_key() {
         st.changed_at = now;
     }
     // The preview: a quarter second after the last change.
-    if st.shown.as_ref() != Some(&st.settings) {
+    if st.shown.as_ref() != Some(&st.settings.preview_key()) {
         if now - st.changed_at >= 0.25 {
             refresh_preview(app, ctx, &mut st);
         } else {
@@ -468,7 +515,8 @@ fn plot_to(app: &mut CadApp, params: Value, open_after: bool) {
 }
 
 /// Paper, Plot layout and Plot style.
-fn left_column(ui: &mut egui::Ui, s: &mut Settings, model: bool, area: Option<(f64, f64)>, pick: &mut bool) {
+fn left_column(ui: &mut egui::Ui, s: &mut Settings, model: bool, area: Option<(f64, f64)>, pick: &mut bool, pens: Option<&cadcraft_doc::PlotStyleTable>) -> Option<PenEdit> {
+    let mut edit = None;
     card(ui, "Paper", |ui| {
         ui.horizontal(|ui| {
             let shown = |i: usize| PAPERS.get(i).map_or(String::new(), |(n, a, b)| format!("{n} ({a} x {b} MM)"));
@@ -562,14 +610,95 @@ fn left_column(ui: &mut egui::Ui, s: &mut Settings, model: bool, area: Option<(f
     });
     card(ui, "Plot style", |ui| {
         let mut choice = s.style;
-        if let Some(i) = segmented(ui, &["Color", "Grayscale", "Black", "Custom pens"], choice, &[true, true, true, false]) {
+        if let Some(i) = segmented(ui, &["Color", "Grayscale", "Black", "Custom pens"], choice, &[true, true, true, true]) {
             choice = i;
         }
         s.style = choice.min(STYLES.len() - 1);
-        ui.label(RichText::new(crate::tl!("Custom pens are not available yet: use Color, Grayscale or Black.")).size(11.0).color(MUTED));
         ui.checkbox(&mut s.lineweights, crate::tl!("Plot object lineweights"));
         ui.checkbox(&mut s.open_after, crate::tl!("Open PDF after plot"));
+        if s.style == 3 {
+            edit = pen_table(ui, s, pens);
+        }
     });
+    edit
+}
+
+/// iStCAD's inline pen table: the 255 index colours on the left; for the one chosen, its output
+/// colour and lineweight on the right.
+fn pen_table(ui: &mut egui::Ui, s: &mut Settings, pens: Option<&cadcraft_doc::PlotStyleTable>) -> Option<PenEdit> {
+    let mut edit = None;
+    let style = |i: u8| pens.and_then(|t| t.styles.get(usize::from(i).saturating_sub(1)));
+    ui.add_space(6.0);
+    ui.horizontal_top(|ui| {
+        Frame::NONE.stroke(Stroke::new(1.0, CARD_EDGE)).show(ui, |ui| {
+            ui.set_width(150.0);
+            egui::ScrollArea::vertical().id_salt("ist_pens").max_height(170.0).show(ui, |ui| {
+                for i in 1..=255u8 {
+                    let [r, g, b] = rgb(i);
+                    let set = style(i).is_some_and(|st| st.color.is_some() || st.lineweight.is_some());
+                    let row = ui.horizontal(|ui| {
+                        let (sw, _) = ui.allocate_exact_size(vec2(16.0, 12.0), egui::Sense::hover());
+                        ui.painter().rect(sw, 0.0, Color32::from_rgb(r, g, b), Stroke::new(1.0, Color32::GRAY), egui::StrokeKind::Inside);
+                        let label = format!("{} {i}{}", crate::tl!("Color"), if set { " •" } else { "" });
+                        ui.selectable_label(s.pen == i, RichText::new(label).color(INK))
+                    });
+                    if row.inner.clicked() {
+                        s.pen = i;
+                    }
+                }
+            });
+        });
+        ui.vertical(|ui| {
+            let current = style(s.pen);
+            let color = current.and_then(|st| st.color).map(|c| format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2));
+            let shown = PEN_COLORS.iter().find(|(_, hex)| hex.map(str::to_string) == color).map_or_else(|| color.clone().unwrap_or_default(), |(n, _)| n.to_string());
+            ui.label(RichText::new(crate::tl!("Output color")).color(MUTED));
+            egui::ComboBox::from_id_salt("ist_pen_color").selected_text(crate::i18n::t(&shown)).width(170.0).show_ui(ui, |ui| {
+                for (name, hex) in PEN_COLORS {
+                    if ui.selectable_label(shown == *name, crate::i18n::t(name)).clicked() {
+                        edit = Some(PenEdit::Color(s.pen, *hex));
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new(crate::tl!("Lineweight")).color(MUTED));
+            let weight = current.and_then(|st| st.lineweight).map(|w| f64::from(w) / 100.0);
+            let shown = weight.map_or_else(|| crate::tl!("Use object lineweight").to_string(), |w| format!("{w:.2} mm"));
+            egui::ComboBox::from_id_salt("ist_pen_weight").selected_text(shown).width(170.0).show_ui(ui, |ui| {
+                if ui.selectable_label(weight.is_none(), crate::tl!("Use object lineweight")).clicked() {
+                    edit = Some(PenEdit::Weight(s.pen, None));
+                }
+                for w in cadcraft_doc::Lineweight::STANDARD.iter() {
+                    let mm = f64::from(*w) / 100.0;
+                    if ui.selectable_label(weight == Some(mm), format!("{mm:.2} mm")).clicked() {
+                        edit = Some(PenEdit::Weight(s.pen, Some(mm)));
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            ui.label(RichText::new(crate::tl!("Select a color on the left, then set how it plots.")).size(11.0).color(MUTED));
+        });
+    });
+    edit
+}
+
+/// The screen colour of index colour `i`.
+fn rgb(i: u8) -> [u8; 3] {
+    let c = cadcraft_doc::color::aci_rgb(i);
+    [c.0, c.1, c.2]
+}
+
+/// Apply a pen change to the drawing's pen table (made on first use), through STYLESMANAGER.
+fn apply_pen(app: &mut CadApp, edit: &PenEdit) -> Result<(), String> {
+    let exists = app.session.doc().is_ok_and(|d| d.plot_style_tables.iter().any(|t| t.name.eq_ignore_ascii_case(PENS)));
+    if !exists {
+        app.run("stylesmanager", json!({ "action": "new", "name": PENS, "kind": "colorDependent", "description": "iStCAD custom pens" }))?;
+    }
+    let style = match edit {
+        PenEdit::Color(i, hex) => json!({ "name": format!("Color_{i}"), "color": hex }),
+        PenEdit::Weight(i, mm) => json!({ "name": format!("Color_{i}"), "lineweight": mm }),
+    };
+    app.run("stylesmanager", json!({ "action": "set", "name": PENS, "style": style })).map(|_| ())
 }
 
 /// A number with up to four decimals and no trailing zeros.
@@ -591,7 +720,7 @@ fn fitted_scale(s: &Settings, area: Option<(f64, f64)>) -> Option<f64> {
 /// Draw the preview for the current settings (a PNG of the sheet, about 900 pixels on its long
 /// side) and the status line.
 fn refresh_preview(app: &mut CadApp, ctx: &egui::Context, st: &mut State) {
-    st.shown = Some(st.settings.clone());
+    st.shown = Some(st.settings.preview_key());
     let area = area_size(app, &st.settings);
     let (_, long) = st.settings.paper_mm();
     let dpi = (900.0 / (long / 25.4)).clamp(20.0, 300.0);
@@ -640,6 +769,8 @@ mod tests {
             style: 2,
             lineweights: true,
             open_after: false,
+            pen: 1,
+            pens_rev: 0,
         }
     }
 
@@ -670,6 +801,20 @@ mod tests {
         let p = Settings { style: 0, target: "Layout1".into(), area: "layout", ..settings() }.params(None, Some(96.0));
         assert!(p.get("plotStyleTable").is_none() && p.get("plotArea").is_none() && p.get("scale").is_none());
         assert_eq!(p["output"], "png");
+    }
+
+    #[test]
+    fn custom_pens_set_the_drawing_s_pen_table() {
+        let mut app = CadApp::new(cadcraft_engine::Session::default(), crate::Services::default());
+        let _ = app.run("ui.sample", json!({}));
+        apply_pen(&mut app, &PenEdit::Color(1, Some("#000000"))).unwrap();
+        apply_pen(&mut app, &PenEdit::Weight(1, Some(0.5))).unwrap();
+        let d = app.session.doc().unwrap();
+        let t = d.plot_style_tables.iter().find(|t| t.name == PENS).expect("the pen table is made");
+        let red = &t.styles[0];
+        assert_eq!((red.color.map(|c| (c.0, c.1, c.2)), red.lineweight), (Some((0, 0, 0)), Some(50)));
+        let p = Settings { style: 3, ..settings() }.params(None, None);
+        assert_eq!(p["plotStyleTable"], PENS);
     }
 
     #[test]
