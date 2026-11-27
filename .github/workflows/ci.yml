@@ -37,7 +37,7 @@ jobs:
       - name: cargo check (app + UI + engine)
         run: cargo check --locked -p cadcraft -p cadcraft-ui-egui -p cadcraft-engine
       - name: Engine command tests
-        run: "cargo test --locked -p cadcraft-engine --lib -- cmd:: lasso"
+        run: "cargo test --locked -p cadcraft-engine --lib -- cmd:: lasso grips::"
       - name: Engine Properties tests (describe and set)
         run: cargo test --locked -p cadcraft-engine --test it -- properties_
       - name: UI unit tests (iStCAD shell + theme)

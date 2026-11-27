@@ -249,3 +249,25 @@ fn grips_on_locked_layers_and_hostile_values() {
         }
     }
 }
+
+#[test]
+fn add_vertex_on_an_arc_segment_keeps_it_curved() {
+    use super::{GripAction, grip_action};
+    use cadcraft_doc::LwPolyline;
+    use cadcraft_geom::PolyVertex;
+    // A half circle from (0,0) to (2,0) through (1,-1), split at its middle: two quarter arcs.
+    let p = LwPolyline {
+        vertices: vec![PolyVertex { p: Vec2::new(0.0, 0.0), bulge: 1.0, ..PolyVertex::default() }, PolyVertex { p: Vec2::new(2.0, 0.0), ..PolyVertex::default() }],
+        closed: false,
+        const_width: 0.0,
+        elevation: 0.0,
+        plinegen: false,
+    };
+    let k = EntityKind::LwPolyline(p);
+    let Some(EntityKind::LwPolyline(out)) = grip_action(&k, 1, GripAction::AddVertex, Some(Vec2::new(1.0, -1.0)), None) else {
+        panic!("Add Vertex applies on the arc's midpoint grip");
+    };
+    let quarter = (std::f64::consts::PI / 8.0).tan();
+    assert_eq!(out.vertices.len(), 3);
+    assert!((out.vertices[0].bulge - quarter).abs() < 1e-9 && (out.vertices[1].bulge - quarter).abs() < 1e-9, "{out:?}");
+}

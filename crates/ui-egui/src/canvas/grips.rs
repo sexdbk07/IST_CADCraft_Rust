@@ -72,6 +72,43 @@ pub(super) fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
     }
 }
 
+/// AutoCAD's Ctrl while a single hot grip is being edited: each press moves to the grip's next
+/// option (Stretch, then Add Vertex, Remove Vertex… then Stretch again), as the option's keyword
+/// would.
+pub(super) fn ctrl_cycles_options(app: &mut CadApp, ctx: &egui::Context, grip_edit: bool) {
+    let down = ctx.input(|i| i.modifiers.ctrl && !i.modifiers.shift && !i.modifiers.alt);
+    let pressed = down && !app.canvas.ctrl_down;
+    app.canvas.ctrl_down = down;
+    // Ctrl with a key is a shortcut, not a cycle.
+    if !pressed || !grip_edit || ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. }))) {
+        return;
+    }
+    let [g] = app.canvas.hot_grips.as_slice() else { return };
+    let options = grip_options(app, *g);
+    if options.is_empty() {
+        return;
+    }
+    let message = app.session.current_prompt().map(|p| p.message).unwrap_or_default();
+    // The option being worked, from the prompt's title; none: Stretch.
+    let current = options.iter().position(|a| message.starts_with(a.title()));
+    if current.is_none() && !message.starts_with("** STRETCH **") {
+        return;
+    }
+    let next = current.map_or(0, |i| i + 1);
+    // From an option, Enter goes back to Stretch first.
+    if current.is_some()
+        && let Err(e) = app.session.input(Input::Enter)
+    {
+        app.session.echo(e.to_string());
+        return;
+    }
+    if let Some(a) = options.get(next)
+        && let Err(e) = app.session.input(Input::Keyword(a.keyword().to_string()))
+    {
+        app.session.echo(e.to_string());
+    }
+}
+
 /// How long the pointer rests on a multifunctional grip before its options show, in seconds.
 const GRIP_HOVER_DELAY: f64 = 0.35;
 

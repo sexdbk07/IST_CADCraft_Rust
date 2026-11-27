@@ -134,6 +134,9 @@ pub struct Shell {
     quick_open: bool,
     /// The edge toolbar is pinned open (its 📌 toggle).
     quick_pinned: bool,
+    /// A layout tab being renamed in place (double-clicked): its name and the text typed, and
+    /// whether the field still has to take the focus.
+    renaming: Option<(String, String, bool)>,
     /// The view height each drawing first showed, the 100 % mark of the zoom readout.
     zoom_ref: HashMap<String, f64>,
     /// The window caption last sent, so it is only sent again when it changes.
@@ -1381,12 +1384,38 @@ fn layout_tabs(app: &mut CadApp, ui: &mut egui::Ui) {
         tabs.extend(layouts.iter().map(|l| l.name.clone()));
     }
     let mut switch = None;
+    let mut rename: Option<(String, String)> = None;
     for name in &tabs {
         let model = name == "Model";
         let shown = if model { crate::tl!("Model").to_string() } else { name.clone() };
         let selected = *name == current;
         let font = FontId::proportional(12.0);
         let g = ui.painter().layout_no_wrap(shown.clone(), font, Color32::WHITE);
+        // A double-clicked layout tab is renamed in place, as AutoCAD's: Enter or clicking away
+        // renames it, Esc leaves it.
+        if app.istcad.renaming.as_ref().is_some_and(|(from, _, _)| from == name) {
+            let mut done = false;
+            if let Some((from, text, focus)) = app.istcad.renaming.as_mut() {
+                let width = (g.size().x + 40.0).max(90.0);
+                let id = ui.scope_id().with(("ist_layout_rename", name.as_str()));
+                let resp = ui.add_sized(vec2(width, 24.0), egui::TextEdit::singleline(text).id(id).font(FontId::proportional(12.0)));
+                if std::mem::take(focus) {
+                    resp.request_focus();
+                }
+                let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                if resp.lost_focus() {
+                    if !esc && text.trim() != from.as_str() && !text.trim().is_empty() {
+                        rename = Some((from.clone(), text.trim().to_string()));
+                    }
+                    done = true;
+                }
+            }
+            if done {
+                app.istcad.renaming = None;
+            }
+            ui.add_space(5.0);
+            continue;
+        }
         let (rect, resp) = ui.allocate_exact_size(vec2((g.size().x + 24.0).max(64.0), 24.0), Sense::click());
         let fill = if selected {
             ink::LAYOUT_ON
@@ -1401,6 +1430,9 @@ fn layout_tabs(app: &mut CadApp, ui: &mut egui::Ui) {
         let resp = resp.on_hover_text(if model { crate::tl!("Model space").to_string() } else { name.clone() });
         if resp.clicked() && !selected {
             switch = Some(name.clone());
+        }
+        if resp.double_clicked() && !model {
+            app.istcad.renaming = Some((name.clone(), name.clone(), true));
         }
         crate::shortcut_menus::attach(app, &resp, |app| crate::shortcut_menus::layout_tab_entries(app, name));
         ui.add_space(5.0);
@@ -1418,6 +1450,11 @@ fn layout_tabs(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     if let Some(n) = switch {
         let _ = app.run("layout.set", json!({ "name": n }));
+    }
+    if let Some((from, to)) = rename
+        && let Err(e) = app.run("layout.rename", json!({ "from": from, "to": to }))
+    {
+        app.set_status(e);
     }
 }
 

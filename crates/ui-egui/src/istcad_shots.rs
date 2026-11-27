@@ -358,3 +358,26 @@ fn istcad_tracking_follows_an_acquired_point() {
     let cursor = h.state().canvas.cursor.expect("a cursor");
     assert!((cursor.y - end.y).abs() < 1e-9, "the cursor sits on the end's horizontal: {cursor:?} vs {end:?}");
 }
+
+/// A layout tab is renamed in place: double-click, type, Enter.
+#[test]
+fn istcad_layout_tab_renames_in_place() {
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        istcad_app(),
+    );
+    h.run_steps(3);
+    let at = text_pos(&h, "Layout1").expect("the Layout1 tab is painted") + vec2(8.0, 6.0);
+    click(&mut h, at);
+    click(&mut h, at);
+    h.run_steps(3);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.event(egui::Event::Text("Sheet A".into()));
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let names: Vec<String> = h.state().session.doc().unwrap().layouts.iter().map(|l| l.name.clone()).collect();
+    assert!(names.iter().any(|n| n == "Sheet A") && !names.iter().any(|n| n == "Layout1"), "{names:?}");
+}

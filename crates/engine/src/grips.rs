@@ -416,6 +416,25 @@ pub fn grip_actions(kind: &EntityKind, index: usize) -> Vec<GripAction> {
     }
 }
 
+/// The bulges of the two segments `a`→`p` and `p`→`b` that replace segment `a`→`b` (bulge `bulge`)
+/// when vertex `p` is added: straight stays straight; an arc's halves keep its tangent at `a` and
+/// at `b`.
+fn split_bulges(a: Vec2, b: Vec2, bulge: f64, p: Vec2) -> (f64, f64) {
+    if bulge.abs() < 1e-12 || p.dist(a) < 1e-12 || p.dist(b) < 1e-12 {
+        return (0.0, 0.0);
+    }
+    // The arc's tangent at `a` is its chord turned by -Δ/2, at `b` by +Δ/2 (Δ = 4·atan(bulge)).
+    let half = 2.0 * bulge.atan();
+    let chord = b - a;
+    let (ta, tb) = (chord.rotate(-half), chord.rotate(half));
+    // The signed angle from `u` to `w`.
+    let turn = |u: Vec2, w: Vec2| (u.x * w.y - u.y * w.x).atan2(u.x * w.x + u.y * w.y);
+    let b1 = (-turn(p - a, ta) / 2.0).tan();
+    let b2 = (turn(b - p, tb) / 2.0).tan();
+    let ok = |x: f64| if x.is_finite() && x.abs() < 1e6 { x } else { 0.0 };
+    (ok(b1), ok(b2))
+}
+
 /// The object after the multifunctional `action` on grip `index`, with the picked point `to`
 /// (Add Vertex: the new vertex; Convert to Arc: a point on the arc; Lengthen: the new end,
 /// projected onto the object; Radius: a point on the new circle) or the typed `value` (Lengthen:
@@ -435,10 +454,13 @@ pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Opti
             if at >= p.vertices.len() {
                 return None;
             }
+            let next = p.vertices.get((at + 1) % p.vertices.len())?.p;
             let v = p.vertices.get_mut(at)?;
-            // The segment is split in two straight ones.
-            v.bulge = 0.0;
-            let nv = cadcraft_geom::PolyVertex { p: to, bulge: 0.0, ..*v };
+            // A straight segment splits in two straight ones; an arc segment in two arcs that keep
+            // its tangents at both ends, as AutoCAD's Add Vertex does (the vertex follows the pick).
+            let (b1, b2) = split_bulges(v.p, next, v.bulge, to);
+            v.bulge = b1;
+            let nv = cadcraft_geom::PolyVertex { p: to, bulge: b2, ..*v };
             p.vertices.insert(at + 1, nv);
         }
         (EntityKind::LwPolyline(p), GripAction::RemoveVertex) => {

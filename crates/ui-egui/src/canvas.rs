@@ -180,6 +180,8 @@ pub struct CanvasState {
     /// The multifunctional grip the pointer rests on, since when (seconds), and the rect of its
     /// hover menu once shown: AutoCAD opens the grip's options after a moment's hover.
     pub(crate) grip_hover: Option<((Handle, usize), f64, Option<Rect>)>,
+    /// Ctrl was down last frame (a press cycles a hot grip's options).
+    ctrl_down: bool,
     /// Dynamic block grips of the selection (cached), the one being dragged, and the list grip
     /// whose choices are open (and whether it opened this frame).
     pub(crate) dyn_grips: crate::dyngrips::Cache,
@@ -1303,6 +1305,7 @@ fn paint_canvas(frame: CanvasPaint<'_>) {
         app.canvas.dyn_hot = None;
     }
     app.canvas.grip_editing = grip_edit;
+    grips::ctrl_cycles_options(app, ui.ctx(), grip_edit);
     if (!app.session.prompting() || grip_edit)
         && app.session.shows_grips(sel.len())
         && let Ok(st) = app.session.state()
