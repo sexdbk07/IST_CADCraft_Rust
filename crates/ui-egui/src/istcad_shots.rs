@@ -409,3 +409,49 @@ fn istcad_layout_tab_renames_in_place() {
     let names: Vec<String> = h.state().session.doc().unwrap().layouts.iter().map(|l| l.name.clone()).collect();
     assert!(names.iter().any(|n| n == "Sheet A") && !names.iter().any(|n| n == "Layout1"), "{names:?}");
 }
+
+/// A selected group is shown as one (GROUPDISPLAYMODE 2): a box and one grip at its centre;
+/// clicking that grip moves the whole group from its centre.
+#[test]
+fn istcad_group_moves_by_its_centre_grip() {
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        istcad_app(),
+    );
+    h.run_steps(3);
+    let (members, centre) = {
+        let d = h.state().session.doc().unwrap();
+        let members: Vec<_> = d.model.iter().take(2).map(|e| e.handle).collect();
+        let b = d
+            .model
+            .iter()
+            .take(2)
+            .map(|e| cadcraft_engine::doc::entity_bounds(d, e, 0))
+            .fold(cadcraft_geom::Bounds2::EMPTY, |a, b| a.union(&b));
+        (members, b.center())
+    };
+    let hex: Vec<String> = members.iter().map(|m| m.hex()).collect();
+    h.state_mut().run("group", json!({"handles": hex})).expect("a group");
+    // No object snap, so the second click lands where it is made.
+    h.state_mut().session.settings.osmode |= 0x4000;
+    h.state_mut().session.set_selection(members.clone());
+    h.run_steps(2);
+    let xf = h.state().canvas.xf.expect("the canvas has drawn");
+    let at = xf.to_screen(centre);
+    click(&mut h, at);
+    h.run_steps(1);
+    assert_eq!(h.state().session.running.as_ref().map(|r| r.id.as_str()), Some("move"), "the centre grip starts MOVE");
+    let before: Vec<_> = members.iter().map(|m| h.state().session.doc().unwrap().entity(*m).map(|e| e.kind.grips())).collect();
+    click(&mut h, at + vec2(40.0, 0.0));
+    h.run_steps(2);
+    let d = h.state().session.doc().unwrap();
+    for (m, was) in members.iter().zip(before) {
+        let now = d.entity(*m).map(|e| e.kind.grips());
+        assert_ne!(now, was, "member {m:?} moved with the group");
+        let (Some(now), Some(was)) = (now, was) else { panic!("the member is still there") };
+        assert!(now[0].x > was[0].x, "moved to the right");
+    }
+}

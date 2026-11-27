@@ -173,6 +173,60 @@ pub(super) fn grip_rect(kind: &cadcraft_doc::EntityKind, count: usize, index: us
     Rect::from_center_size(center, vec2(size * 2.0, if midpoint { size } else { size * 2.0 }))
 }
 
+/// The groups shown as one (GROUPDISPLAYMODE 1 or 2, with PICKSTYLE's group selection): each
+/// selectable group whose members are all selected, its members and their box.
+pub(super) fn selected_groups(app: &CadApp) -> Vec<(Vec<Handle>, cadcraft_geom::Bounds2)> {
+    let s = &app.session.settings;
+    if s.groupdisplaymode == 0 || s.pickstyle & 1 == 0 {
+        return Vec::new();
+    }
+    let Ok(st) = app.session.state() else { return Vec::new() };
+    let sel = app.session.selection();
+    if sel.is_empty() {
+        return Vec::new();
+    }
+    st.doc
+        .groups
+        .iter()
+        .filter(|g| g.selectable)
+        .filter_map(|g| {
+            let members: Vec<Handle> = g.members.iter().copied().filter(|m| st.doc.entity(*m).is_some()).collect();
+            if members.is_empty() || !members.iter().all(|m| sel.contains(m)) {
+                return None;
+            }
+            let b = members
+                .iter()
+                .filter_map(|m| st.doc.entity(*m))
+                .map(|e| cadcraft_doc::entity_bounds(&st.doc, e, 0))
+                .filter(|b| !b.is_empty())
+                .fold(cadcraft_geom::Bounds2::EMPTY, |a, b| a.union(&b));
+            (!b.is_empty()).then_some((members, b))
+        })
+        .collect()
+}
+
+/// The centre grip of a selected group under the cursor: the group's members and its centre.
+pub(super) fn group_grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Vec<Handle>, cadcraft_geom::Vec2)> {
+    let hp = hover?;
+    let gs = app.session.settings.gripsize as f32;
+    selected_groups(app).into_iter().find_map(|(members, b)| {
+        let c = b.center();
+        Rect::from_center_size(xf.to_screen(c), vec2(gs * 2.0, gs * 2.0)).expand(3.0).contains(hp).then_some((members, c))
+    })
+}
+
+/// A group's centre grip clicked: MOVE its members from the centre, as AutoCAD stretches a
+/// group's grip.
+pub(super) fn click_group_grip(app: &mut CadApp, members: Vec<Handle>, centre: cadcraft_geom::Vec2) {
+    app.session.set_selection(members);
+    app.start("move");
+    if app.session.running.as_ref().is_some_and(|r| r.id == "move")
+        && let Err(e) = app.session.input(Input::Point(centre))
+    {
+        app.session.echo(e.to_string());
+    }
+}
+
 /// The grip of a selected object under the cursor, if any: (object, grip index).
 pub(super) fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)> {
     let hp = hover?;
@@ -182,9 +236,10 @@ pub(super) fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Han
     if !app.session.shows_grips(sel.len()) {
         return None;
     }
+    let grouped: Vec<Handle> = selected_groups(app).into_iter().flat_map(|(m, _)| m).collect();
     for h in sel.iter().take(200) {
         let e = st.doc.entity(*h)?;
-        if !st.shows(e) || st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) {
+        if !st.shows(e) || st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) || grouped.contains(h) {
             continue;
         }
         let grips = e.kind.grips();

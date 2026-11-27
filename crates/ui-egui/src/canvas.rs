@@ -849,6 +849,8 @@ fn handle_presses(app: &mut CadApp, ui: &egui::Ui, context: &PressContext) -> bo
                     if grip_clicks && let Some((at, m)) = p.grip_click(pos) {
                         if let Some(g) = crate::dyngrips::at(app, &xf, Some(at)) {
                             crate::dyngrips::click(app, g);
+                        } else if let Some((members, c)) = grips::group_grip_at(app, &xf, Some(at)) {
+                            grips::click_group_grip(app, members, c);
                         } else if let Some(g) = grip_at(app, &xf, Some(at)) {
                             click_grip(app, g, m.shift);
                         }
@@ -1044,6 +1046,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         } else if let Some(g) = crate::dyngrips::at(app, &xf, hover_pos) {
             crate::dyngrips::click(app, g);
+        } else if let Some((members, c)) = grips::group_grip_at(app, &xf, hover_pos) {
+            grips::click_group_grip(app, members, c);
         } else if let Some(g) = grip_at(app, &xf, hover_pos) {
             click_grip(app, g, mods.shift);
         } else if let Err(e) = app.session.idle_click(raw_world.unwrap_or(p), mods.shift) {
@@ -1161,7 +1165,7 @@ fn press_takes(app: &mut CadApp, xf: &Xf, pos: Pos2) -> bool {
     if app.session.prompting() {
         return true;
     }
-    crate::dyngrips::at(app, xf, Some(pos)).is_none() && grip_at(app, xf, Some(pos)).is_none()
+    crate::dyngrips::at(app, xf, Some(pos)).is_none() && grip_at(app, xf, Some(pos)).is_none() && grips::group_grip_at(app, xf, Some(pos)).is_none()
 }
 
 /// Act on a press at `pos`: at a prompt the point goes in (snapped as the cursor would be there);
@@ -1311,7 +1315,31 @@ fn paint_canvas(frame: CanvasPaint<'_>) {
         && let Ok(st) = app.session.state()
     {
         let gs = app.session.settings.gripsize as f32;
+        // Groups shown as one: their box (GROUPDISPLAYMODE 2) and one grip at the centre, in
+        // place of their members' grips.
+        let groups = grips::selected_groups(app);
+        let grouped: Vec<Handle> = groups.iter().flat_map(|(m, _)| m.iter().copied()).collect();
+        for (_, b) in &groups {
+            let r = Rect::from_two_pos(xf.to_screen(b.min), xf.to_screen(b.max));
+            if app.session.settings.groupdisplaymode == 2 {
+                let ink = Stroke::new(1.0, t.grip);
+                let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+                for w in corners.windows(2) {
+                    painter.extend(egui::Shape::dashed_line(&[w[0], w[1]], ink, 6.0, 4.0));
+                }
+            }
+            let c = r.center();
+            if rect.contains(c) {
+                let g = Rect::from_center_size(c, vec2(gs * 2.0, gs * 2.0));
+                let warm = hover_pos.is_some_and(|hp| g.expand(2.0).contains(hp));
+                painter.rect_filled(g, 0.0, if warm { Color32::from_rgb(0xff, 0x7f, 0x9f) } else { t.grip });
+                painter.rect_stroke(g, 0.0, Stroke::new(1.0, Color32::from_rgb(0x10, 0x30, 0x80)), egui::StrokeKind::Middle);
+            }
+        }
         for h in sel.iter().take(200) {
+            if grouped.contains(h) {
+                continue;
+            }
             if let Some(e) = st.doc.entity(*h)
                 && st.shows(e)
             {
