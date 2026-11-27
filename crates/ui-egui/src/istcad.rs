@@ -1123,12 +1123,15 @@ pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
         if app.ui.show_command_line {
             command_bar(app, ui, bar, r.top(), t);
         }
-        row(ui, tabs_row, egui::Layout::left_to_right(egui::Align::Center), |ui| layout_tabs(app, ui));
+        let tabs = row(ui, tabs_row, egui::Layout::left_to_right(egui::Align::Center), |ui| layout_tabs(app, ui));
         row(ui, toggles_row, egui::Layout::right_to_left(egui::Align::Center), |ui| drafting_toggles(app, ui));
         let zoom = row(ui, zoom_row, egui::Layout::right_to_left(egui::Align::Center), |ui| zoom_controls(app, ui, t));
         // Where iStCAD has three view glyphs, left of the zoom readout: AutoCAD's SNAP, LWT and
-        // QP toggles, as many as fit.
-        let extra = Rect::from_min_max(zoom_row.min, pos2((zoom.left() - 6.0).max(zoom_row.left()), zoom_row.bottom()));
+        // QP toggles. They may reach left past the column into the layout tabs' row, up to the
+        // last tab.
+        let tabs_end = tabs.right() + 12.0;
+        let from = (zoom_row.left() - 120.0).max(tabs_end).min(zoom.left() - 6.0);
+        let extra = Rect::from_min_max(pos2(from, zoom_row.top()), pos2((zoom.left() - 6.0).max(from), zoom_row.bottom()));
         row(ui, extra, egui::Layout::right_to_left(egui::Align::Center), |ui| more_toggles(app, ui));
     });
 }

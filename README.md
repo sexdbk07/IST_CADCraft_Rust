@@ -29,7 +29,7 @@ Linux cần thêm các gói: `pkg-config libxkbcommon-dev libwayland-dev libx11-
 1. Cài **Visual Studio 2022 trở lên** với workload **Desktop development with C++** (cung cấp trình liên kết MSVC mà Rust cần trên Windows).
 2. Cài **Rust** từ https://rustup.rs (chọn toolchain mặc định `stable-x86_64-pc-windows-msvc`). Mở lại Visual Studio sau khi cài, để `cargo` có trong PATH.
 3. Mở **`IST_CADCraft.sln`** ở thư mục gốc. Chọn cấu hình `Debug|x64` hoặc `Release|x64`.
-4. **Build** (Ctrl+Shift+B) sẽ gọi `cargo build -p cadcraft`. **F5** chạy `target\<cấu hình>\cadcraft.exe` dưới debugger của Visual Studio; mở file `.rs` (trong Solution Explorer) để đặt breakpoint.
+4. **Build** (Ctrl+Shift+B) sẽ gọi `cargo build -p cadcraft`. **F5** chạy `target\<cấu hình>\IST_Cadcraft.exe` dưới debugger của Visual Studio; mở file `.rs` (trong Solution Explorer) để đặt breakpoint.
 5. Lần build đầu tải các thư viện Rust và biên dịch toàn bộ, mất khoảng 5–15 phút; các lần sau nhanh hơn nhiều. Bản `Debug` chạy chậm hơn hẳn `Release` khi vẽ bản vẽ lớn.
 
 Để chạy với bản vẽ mẫu: Project ▸ Properties ▸ Debugging ▸ Command Arguments = `--sample`.
@@ -38,7 +38,7 @@ Linux cần thêm các gói: `pkg-config libxkbcommon-dev libwayland-dev libx11-
 
 Mở thư mục gốc, cài các extension được gợi ý (rust-analyzer, CodeLLDB / C++). `Ctrl+Shift+B` để build, F5 để chạy với debugger (cấu hình trong `.vscode/`).
 
-CI (`.github/workflows/ci.yml`) chạy `cargo check`, test lệnh của engine và test của shell iStCAD trên Linux, sau đó build release cho Windows (tải `cadcraft.exe` ở mục Artifacts của mỗi lần chạy).
+CI (`.github/workflows/ci.yml`) chạy `cargo check`, test lệnh của engine và test của shell iStCAD trên Linux, sau đó build release cho Windows (tải `IST_Cadcraft.exe` ở mục Artifacts của mỗi lần chạy).
 
 ## Lệnh thường dùng (theo iStCAD)
 

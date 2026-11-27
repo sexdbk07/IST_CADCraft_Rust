@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   IST_CADCraft for Visual Studio (Professional / Community / Enterprise, 2022 or later).
-  A Makefile project: Build / Rebuild / Clean call Cargo, F5 starts target\<config>\cadcraft.exe
+  A Makefile project: Build / Rebuild / Clean call Cargo, F5 starts target\<config>\IST_Cadcraft.exe
   under the Visual Studio debugger (Rust emits PDB symbols on Windows, so breakpoints in .rs files
   work). Needs the "Desktop development with C++" workload and Rust (rustup, MSVC toolchain).
 -->
@@ -40,9 +40,9 @@
     <NMakeBuildCommandLine>cd /d "$(RepoRoot)" &amp;&amp; cargo build -p cadcraft $(CargoProfileArg) --message-format=short</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>cd /d "$(RepoRoot)" &amp;&amp; cargo clean -p cadcraft $(CargoProfileArg) &amp;&amp; cargo build -p cadcraft $(CargoProfileArg) --message-format=short</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>cd /d "$(RepoRoot)" &amp;&amp; cargo clean -p cadcraft $(CargoProfileArg)</NMakeCleanCommandLine>
-    <NMakeOutput>$(OutDir)cadcraft.exe</NMakeOutput>
+    <NMakeOutput>$(OutDir)IST_Cadcraft.exe</NMakeOutput>
     <NMakePreprocessorDefinitions />
-    <LocalDebuggerCommand>$(OutDir)cadcraft.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommand>$(OutDir)IST_Cadcraft.exe</LocalDebuggerCommand>
     <LocalDebuggerWorkingDirectory>$(RepoRoot)</LocalDebuggerWorkingDirectory>
     <LocalDebuggerCommandArguments />
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>

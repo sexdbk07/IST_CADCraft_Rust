@@ -3,7 +3,7 @@
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-/// The marker file a portable copy ships beside `cadcraft.exe`.
+/// The marker file a portable copy ships beside `IST_Cadcraft.exe`.
 pub(crate) const PORTABLE_MARKER: &str = "portable.txt";
 
 /// The settings folder a portable copy keeps beside the executable.

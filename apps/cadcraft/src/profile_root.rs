@@ -197,7 +197,7 @@ fn is_portable_layout(path: &Path, platform: Platform) -> bool {
     // marker only counts beside a CADCraft executable, so an unrelated portable.txt higher up
     // (in a user folder or at a drive root) does not refuse the profile.
     path.ancestors().enumerate().any(|(depth, ancestor)| {
-        portable_marker(ancestor).is_some() && (depth == 0 || ["cadcraft.exe", "cadcraft"].iter().any(|exe| ancestor.join(exe).is_file()))
+        portable_marker(ancestor).is_some() && (depth == 0 || ["IST_Cadcraft.exe", "IST_Cadcraft", "cadcraft.exe", "cadcraft"].iter().any(|exe| ancestor.join(exe).is_file()))
     }) || path.components().any(|component| match component {
         Component::Normal(name) if platform.ignores_case() => name.to_string_lossy().eq_ignore_ascii_case(PORTABLE_DATA_DIR),
         Component::Normal(name) => name == PORTABLE_DATA_DIR,

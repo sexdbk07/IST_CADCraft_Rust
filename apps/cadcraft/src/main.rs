@@ -12,6 +12,9 @@
 //! `log` records go to standard error and `<settings dir>/logs/cadcraft.log` (`RUST_LOG` sets the
 //! levels); see [`logging`]. The `CADCRAFT_*` variables are read once, at startup; see [`env`].
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+// The program file is IST_Cadcraft.exe, as the product is named; the binary crate takes that
+// name, which is not snake case.
+#![allow(non_snake_case)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 #[cfg(any(target_os = "macos", test))]

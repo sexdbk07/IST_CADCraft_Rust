@@ -1,4 +1,4 @@
-//! Windows only: embed the app icon and version info into `cadcraft.exe`. Elsewhere a no-op.
+//! Windows only: embed the app icon and version info into `IST_Cadcraft.exe`. Elsewhere a no-op.
 //!
 //! The build channel comes from `CADCRAFT_BUILD_CHANNEL`: `nightly-v1` compiles a Nightly build
 //! with its own icon and version, `stable`/unset is the stable build, and anything else is refused
@@ -53,7 +53,7 @@ fn main() {
         .set("FileDescription", if nightly { "CADCraft Nightly computer-aided design" } else { "CADCraft computer-aided design" })
         .set("CompanyName", "Learning Machines LLC")
         .set("LegalCopyright", "Copyright (c) 2026 ArtCraft Team and the CADCraft contributors. MIT OR Apache-2.0.")
-        .set("OriginalFilename", "cadcraft.exe")
+        .set("OriginalFilename", "IST_Cadcraft.exe")
         .set("InternalName", "cadcraft");
     if nightly {
         // The Launcher verifies the PE ProductVersion against the exact feed identity, not FileVersion.
@@ -64,6 +64,6 @@ fn main() {
             eprintln!("embedding Windows resources failed: {e}");
             std::process::exit(1);
         }
-        println!("cargo:warning=cadcraft.exe built without icon/version resources: {e}");
+        println!("cargo:warning=IST_Cadcraft.exe built without icon/version resources: {e}");
     }
 }
