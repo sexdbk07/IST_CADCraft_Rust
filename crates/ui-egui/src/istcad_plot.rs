@@ -302,7 +302,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Option<
         .min_size(vec2(860.0, 560.0))
         .pivot(egui::Align2::CENTER_CENTER)
         .default_pos(center)
-        .frame(Frame::window(&ctx.style()).fill(BG).inner_margin(Margin::same(14)))
+        .frame(Frame::window(&ctx.global_style()).fill(BG).inner_margin(Margin::same(14)))
         .show(ctx, |ui| {
             ui.style_mut().visuals = egui::Visuals::light();
             ui.style_mut().visuals.selection.bg_fill = ACCENT;
