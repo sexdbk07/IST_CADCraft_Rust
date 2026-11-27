@@ -463,3 +463,50 @@ fn istcad_group_moves_by_its_centre_grip() {
         assert!(now[0].x > was[0].x, "moved to the right");
     }
 }
+
+/// The segments a PLINE has drawn so far snap like any object while it goes on: the first
+/// vertex (Endpoint), a segment's Midpoint, and where the next segment would cross an earlier
+/// one (Intersection, from the cursor near it).
+#[test]
+fn istcad_pline_snaps_to_its_own_segments() {
+    let mut h = Harness::builder().with_size(vec2(1600.0, 900.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        istcad_app(),
+    );
+    h.run_steps(3);
+    // An empty drawing, so only the polyline is there to snap to.
+    let all: Vec<_> = h.state().session.doc().unwrap().model.iter().map(|e| e.handle).collect();
+    h.state_mut().session.set_selection(all);
+    h.state_mut().run("erase", json!({})).expect("erased");
+    use cadcraft_engine::snap::mode;
+    h.state_mut().session.settings.osmode = mode::END | mode::MID | mode::INT;
+    h.state_mut().start("pline");
+    h.run_steps(2);
+    let corners = [pos2(500.0, 300.0), pos2(900.0, 300.0), pos2(900.0, 600.0), pos2(700.0, 600.0)];
+    for c in corners {
+        click(&mut h, c);
+        h.run_steps(1);
+    }
+    let xf = h.state().canvas.xf.expect("the canvas has drawn");
+    let verts: Vec<cadcraft_geom::Vec2> = {
+        let d = h.state().session.doc().unwrap();
+        let pl = d.model.iter().find_map(|e| if let cadcraft_engine::doc::EntityKind::LwPolyline(p) = &e.kind { Some(p.clone()) } else { None });
+        pl.expect("the polyline drawn so far is in the drawing").vertices.iter().map(|v| v.p).collect()
+    };
+    assert_eq!(verts.len(), 4, "{verts:?}");
+    let first = verts[0];
+    let mid = (verts[0] + verts[1]) * 0.5;
+    let expect = |h: &mut Harness<'_, CadApp>, at: egui::Pos2, want: cadcraft_geom::Vec2, m: u32| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(3);
+        let snap = h.state().canvas.snap;
+        assert!(snap.is_some_and(|s| s.mode == m && s.point.dist(want) < 1e-6), "snap near {at:?}: {snap:?}, want mode {m} at {want:?}");
+    };
+    expect(&mut h, xf.to_screen(first) + vec2(3.0, 2.0), first, mode::END);
+    expect(&mut h, xf.to_screen(mid) + vec2(3.0, 2.0), mid, mode::MID);
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+}
