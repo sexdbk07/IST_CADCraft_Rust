@@ -23,7 +23,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: System packages
         run: |
-          sudo apt-get update
+          # A runner image's extra repository (packages.microsoft.com) can refuse; Ubuntu's own lists suffice.
+          sudo apt-get update || true
           sudo apt-get install -y --no-install-recommends pkg-config libxkbcommon-dev libwayland-dev \
             libx11-dev libxcb1-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev \
             libfreetype-dev libgl1-mesa-dev libgtk-3-dev
