@@ -146,6 +146,20 @@ fn istcad_window_shows_its_rows_and_properties_palette() {
     save(&mut h, "06-line-dyn-polar");
     h.key_press(egui::Key::Escape);
     h.run_steps(2);
+
+    // PLOT: iStCAD's Plot (PDF) dialog with its live preview.
+    cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
+        read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
+        write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
+        plot: Some(|d, space, opts| cadcraft_io::plotter::plot(d, space, opts).map_err(|e| e.to_string())),
+    });
+    h.state_mut().start("plot");
+    h.run_steps(4);
+    let shown = painted(&h);
+    assert!(shown.iter().any(|t| t == "Plot PDF") && shown.iter().any(|t| t == "PAPER"), "the Plot (PDF) dialog: {shown:?}");
+    save(&mut h, "07-plot");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
 }
 
 /// The palette edits by hand, as a user does: click a value, type, Enter.
