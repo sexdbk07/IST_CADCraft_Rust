@@ -1126,26 +1126,27 @@ pub fn command_dock(app: &mut CadApp, ui: &mut egui::Ui) {
         let tabs = row(ui, tabs_row, egui::Layout::left_to_right(egui::Align::Center), |ui| layout_tabs(app, ui));
         row(ui, toggles_row, egui::Layout::right_to_left(egui::Align::Center), |ui| drafting_toggles(app, ui));
         let zoom = row(ui, zoom_row, egui::Layout::right_to_left(egui::Align::Center), |ui| zoom_controls(app, ui, t));
-        // Where iStCAD has three view glyphs, left of the zoom readout: AutoCAD's SNAP, LWT and
-        // QP toggles. They may reach left past the column into the layout tabs' row, up to the
+        // Where iStCAD has three view glyphs, left of the zoom readout: AutoCAD's GRID, SNAP,
+        // LWT and QP toggles (GRID moved here from the right end). They may reach left past the column into the layout tabs' row, up to the
         // last tab.
         let tabs_end = tabs.right() + 12.0;
-        let from = (zoom_row.left() - 120.0).max(tabs_end).min(zoom.left() - 6.0);
+        let from = (zoom_row.left() - 160.0).max(tabs_end).min(zoom.left() - 6.0);
         let extra = Rect::from_min_max(pos2(from, zoom_row.top()), pos2((zoom.left() - 6.0).max(from), zoom_row.bottom()));
         row(ui, extra, egui::Layout::right_to_left(egui::Align::Center), |ui| more_toggles(app, ui));
     });
 }
 
-/// AutoCAD's Snap (F9), Lineweight and Quick Properties toggles beside the zoom readout; they
-/// never cancel the running command.
+/// AutoCAD's Grid (F7), Snap (F9), Lineweight and Quick Properties toggles beside the zoom
+/// readout; they never cancel the running command.
 fn more_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
     let s = &app.session.settings;
     let mut toggle = None;
-    // Right to left, so they read SNAP LWT QP.
+    // Right to left, so they read GRID SNAP LWT QP.
     for (label, on, cmd, tip) in [
         ("QP", s.qpmode, "qpmode", "Quick Properties when objects are selected — click to toggle"),
         ("LWT", s.lwdisplay, "lwdisplay", "Show lineweights — click to toggle"),
         ("SNAP", s.snapmode, "snap", "Snap to the snap grid (F9) — click to toggle"),
+        ("GRID", s.gridmode, "grid", "Show or hide the drawing grid (F7)"),
     ] {
         let w = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(8.0), Color32::WHITE).size().x + 8.0;
         if ui.available_width() < w + 4.0 {
@@ -1480,11 +1481,6 @@ fn drafting_toggles(app: &mut CadApp, ui: &mut egui::Ui) {
 /// The zoom readout (100 % = the drawing's first view), −, +, Ext., the 68-point slider and GRID,
 /// laid out right to left.
 fn zoom_controls(app: &mut CadApp, ui: &mut egui::Ui, t: Tokens) {
-    let grid = app.session.settings.gridmode;
-    if status_toggle(ui, "GRID", grid, "Show or hide the drawing grid", vec2(38.0, 22.0), 9.0).clicked() {
-        crate::menus::run_transparent(app, "grid");
-    }
-    ui.add_space(4.0);
     let Ok(st) = app.session.state() else { return };
     let height = st.view().height;
     let reference = *app.istcad.zoom_ref.entry(st.title.clone()).or_insert(height);
