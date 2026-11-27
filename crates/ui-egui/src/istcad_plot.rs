@@ -554,7 +554,9 @@ fn left_column(ui: &mut egui::Ui, s: &mut Settings, model: bool, area: Option<(f
             if s.fit
                 && let Some(k) = fitted_scale(s, area)
             {
-                ui.label(RichText::new(format!("{} 1:{k:.3}", crate::tl!("Scale"))).size(11.5).color(MUTED));
+                // As AutoCAD reads a fitted scale: paper millimetres to drawing units.
+                let units = crate::tl!("units");
+                ui.label(RichText::new(format!("{} 1 mm = {} {units}", crate::tl!("Scale"), trim(k))).size(11.5).color(MUTED));
             }
         });
     });
@@ -568,6 +570,12 @@ fn left_column(ui: &mut egui::Ui, s: &mut Settings, model: bool, area: Option<(f
         ui.checkbox(&mut s.lineweights, crate::tl!("Plot object lineweights"));
         ui.checkbox(&mut s.open_after, crate::tl!("Open PDF after plot"));
     });
+}
+
+/// A number with up to four decimals and no trailing zeros.
+fn trim(v: f64) -> String {
+    let s = format!("{v:.4}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 /// The scale a fitted model plot comes to: drawing units per paper mm (shown 1:k).
