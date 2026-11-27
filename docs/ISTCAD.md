@@ -89,3 +89,7 @@ What made saving slow (callgrind): a quadratic ENDBLK lookup per block, the draw
 three times for a 2007 file with legacy visual styles, and hex text of binary chunks normalised
 one character at a time. What remains is mostly acadrust's DXF reader and its 2007 page
 compressor in the DWG worker.
+
+## Plot (iStCAD 1.0.231–1.0.233 `ShowPlotDialog`)
+
+The iStCAD window opens iStCAD's Plot (PDF) dialog for PLOT, PRINT and Ctrl+P (`istcad_plot.rs`): Paper (ISO A0–A5, ANSI A–D, Custom; margin; Auto / Portrait / Landscape), Plot layout (Model: Extents, Display, Window picked in the drawing; a layout: its sheet; Fit to paper or 1:1 … 5:1 or Custom mm = units; Center the plot or an X/Y offset; the fitted scale), Plot style (Color, Grayscale, Black; object lineweights; open the PDF after plotting), a live preview a quarter second after each change, and All layouts → PDF, Apply to layout, Plot PDF, Close. Not there yet: iStCAD's custom pen table (shown disabled), scaled and default lineweights, and the layout viewport card.

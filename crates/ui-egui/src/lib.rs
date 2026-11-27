@@ -59,6 +59,7 @@ pub mod i18n;
 pub mod icons;
 pub mod istcad;
 pub mod istcad_icons;
+pub mod istcad_plot;
 pub mod istcad_props;
 #[cfg(test)]
 mod istcad_shots;
@@ -258,6 +259,8 @@ pub struct Services {
     /// macOS every quit ends the process inside AppKit's terminate, after `on_exit`, so code
     /// after `eframe::run_native` never runs there (the Nightly session record is finished here).
     pub at_exit: Option<AtExitFn>,
+    /// Open a file the app wrote (a plotted PDF) in the system's viewer, where the host can.
+    pub open_document: Option<Box<dyn Fn(&str)>>,
 }
 
 /// Runs once when the app leaves ([`Services::at_exit`]).
@@ -1088,6 +1091,7 @@ impl CadApp {
         capture::drain(self, ctx);
         self.gpu_fault_tick(ctx);
         managers::plot_window_resume(self, ctx);
+        istcad_plot::resume(self, ctx);
         hatchdlg::resume(self);
         wblock::resume(self);
         // What follows is frame work, once per layout frame or hidden tick.

@@ -62,6 +62,8 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
         "pagesetup" => page_setup(app, ctx, open),
         "csettings" => constraint_settings(app, ctx, open),
         "namedvports" => named_vports::dialog(app, ctx, open),
+        // The iStCAD window plots with iStCAD's Plot (PDF) dialog.
+        "plot" if app.istcad.enabled => crate::istcad_plot::dialog(app, ctx, open),
         "plot" => plot(app, ctx, open),
         _ => {
             *open = false;

@@ -218,6 +218,20 @@ fn services() -> Services {
         })),
         // Set in `main` once the Nightly session record exists.
         at_exit: None,
+        open_document: Some(Box::new(open_document)),
+    }
+}
+
+/// Open `path` in the system's viewer for its type (a plotted PDF), without waiting for it.
+fn open_document(path: &str) {
+    #[cfg(target_os = "windows")]
+    let r = std::process::Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let r = std::process::Command::new("xdg-open").arg(path).spawn();
+    if let Err(e) = r {
+        log::warn!("could not open {path}: {e}");
     }
 }
 
