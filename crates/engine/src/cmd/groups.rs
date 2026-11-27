@@ -97,6 +97,28 @@ pub(crate) fn create(s: &mut Session, name: Option<&str>, description: &str, hs:
     Ok(name)
 }
 
+/// After a copy (`pairs`: each source and its copy), every group whose members were all copied
+/// gets a copy of its own: an unnamed group (*A…) of the copies, as AutoCAD's COPY makes one.
+pub(crate) fn copy_whole_groups(d: &mut cadcraft_doc::Drawing, pairs: &[(Handle, Handle)]) {
+    let copy_of = |h: &Handle| pairs.iter().find(|(from, _)| from == h).map(|(_, to)| *to);
+    let new: Vec<Group> = d
+        .groups
+        .iter()
+        .filter(|g| !g.members.is_empty())
+        .filter_map(|g| {
+            let members: Option<Vec<Handle>> = g.members.iter().filter(|m| d.entity(**m).is_some()).map(copy_of).collect();
+            members.filter(|m| !m.is_empty()).map(|members| Group { name: String::new(), description: g.description.clone(), selectable: g.selectable, members })
+        })
+        .collect();
+    for mut g in new {
+        if d.groups.len() >= MAX_GROUPS {
+            break;
+        }
+        g.name = next_unnamed(d);
+        d.groups.push(g);
+    }
+}
+
 /// Remove the groups at `idx`; their objects stay. Returns the names removed.
 pub(crate) fn ungroup(s: &mut Session, idx: &[usize]) -> Result<Vec<String>> {
     let names: Vec<String> = idx.iter().filter_map(|i| s.doc().ok()?.groups.get(*i).map(|g| g.name.clone())).collect();

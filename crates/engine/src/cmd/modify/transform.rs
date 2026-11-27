@@ -84,6 +84,8 @@ pub(crate) fn at_elevation(s: &Session, p: Vec2) -> Vec3 {
 fn edit_entities(s: &mut Session, hs: &[Handle], copy: bool, edit: impl Fn(&mut Entity)) -> Result<Vec<Handle>> {
     let d = s.doc_mut()?;
     let mut out = Vec::new();
+    // Each copy's source, so a group copied whole gets a group of its copies.
+    let mut copied: Vec<(Handle, Handle)> = Vec::new();
     for h in hs {
         let Some(sp) = d.space_of(*h) else { continue };
         if copy {
@@ -94,6 +96,7 @@ fn edit_entities(s: &mut Session, hs: &[Handle], copy: bool, edit: impl Fn(&mut 
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);
                 out.push(nh);
+                copied.push((*h, nh));
             }
         } else {
             let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
@@ -103,6 +106,9 @@ fn edit_entities(s: &mut Session, hs: &[Handle], copy: bool, edit: impl Fn(&mut 
             d.modify_entity(*h, &edit)?;
             out.push(*h);
         }
+    }
+    if !copied.is_empty() {
+        crate::cmd::groups::copy_whole_groups(d, &copied);
     }
     Ok(out)
 }

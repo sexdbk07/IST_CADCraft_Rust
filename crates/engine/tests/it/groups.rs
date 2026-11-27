@@ -155,3 +155,18 @@ fn erased_members_leave_groups() {
     s.cmdline("").unwrap();
     assert_eq!(groups(&s).iter().map(|g| g.0.as_str()).collect::<Vec<_>>(), ["B"]);
 }
+
+#[test]
+fn copying_a_whole_group_makes_a_group_of_the_copies() {
+    let (mut s, hs) = three_lines();
+    s.execute("group", &json!({ "name": "Doors", "handles": hex(&hs[..2]) })).unwrap();
+    let r = s.execute("copy", &json!({ "handles": hex(&hs[..2]), "from": [0, 0], "to": [20, 0] })).unwrap();
+    let copies: Vec<String> = r["handles"].as_array().unwrap().iter().map(|h| h.as_str().unwrap().to_string()).collect();
+    let gs = groups(&s);
+    assert_eq!(gs.len(), 2, "{gs:?}");
+    assert!(gs[1].0.starts_with("*A"));
+    assert_eq!(hex(&gs[1].2), copies);
+    // A part of a group copied makes no group.
+    s.execute("copy", &json!({ "handles": hex(&hs[..1]), "from": [0, 0], "to": [40, 0] })).unwrap();
+    assert_eq!(groups(&s).len(), 2);
+}
